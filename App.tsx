@@ -3,9 +3,10 @@ import Graph3D from './components/Graph3D';
 import { INITIAL_DATA, LAST_UPDATED } from './constants';
 import { SHARED_FOLLOWING_DATA } from './sharedFollowingData';
 import { DEFAULT_LOCALE, ENGLISH_LOCALE, LOCALE_STORAGE_KEY, createTranslator, resolveInitialLocale } from './services/i18n.js';
+import { getSharedToggleAppearance, getSidebarRowAppearance, getSidebarToggleButtonClasses } from './services/sidebarAppearance.js';
 import { computeSharedCandidates, mergeSharedCandidatesIntoGraph } from './services/sharedFollowing.js';
 import { GraphData, GraphNode, SharedFollowingCandidateNode, SharedFollowingMode } from './types';
-import { X as XIcon, Building2, Link2, ChevronLeft, ChevronRight, Menu, Calendar, BadgeCheck, MapPin, Search, HelpCircle, Sparkles, Users, RotateCcw, Plus, Check, Layers } from 'lucide-react';
+import { X as XIcon, Building2, Link2, ChevronLeft, ChevronRight, Calendar, BadgeCheck, MapPin, Search, HelpCircle, Sparkles, Users, RotateCcw, Plus, Check, Layers } from 'lucide-react';
 
 const CATEGORY_LEGEND = [
   { key: 'company', color: '#FFD4A3', labelKey: 'legend.company' },
@@ -290,6 +291,9 @@ export default function App() {
     return selectedSharedSourceIds.includes(nodeId);
   };
 
+  const creatorRowAppearance = getSidebarRowAppearance(showCreatorCard);
+  const sidebarToggleButtonClasses = getSidebarToggleButtonClasses(isMobile, isSidebarOpen);
+
   return (
     <div className="w-full h-screen relative overflow-hidden bg-[#0B0C15] text-white font-sans">
       
@@ -327,130 +331,153 @@ export default function App() {
 
       {/* LEFT SIDEBAR - RANKED LIST */}
       <div
-        className={`absolute top-0 left-0 h-full bg-[#05060A]/80 backdrop-blur-xl border-r border-white/10 z-30 transition-all duration-300 ease-in-out flex flex-col ${isMobile ? (isSidebarOpen ? 'w-72 translate-x-0' : 'w-72 -translate-x-72') : (isSidebarOpen ? 'w-80 translate-x-0' : 'w-80 -translate-x-80')}`}
+        className={`absolute top-0 left-0 h-full overflow-hidden bg-[#05060A]/74 backdrop-blur-2xl border-r border-white/[0.08] z-30 transition-all duration-300 ease-in-out shadow-[24px_0_80px_rgba(2,6,23,0.42)] ${isMobile ? (isSidebarOpen ? 'w-72 translate-x-0' : 'w-72 -translate-x-72') : (isSidebarOpen ? 'w-80 translate-x-0' : 'w-80 -translate-x-80')}`}
       >
-        <div className="px-4 py-3 border-b border-white/10 bg-[#05060A]/50">
-            <h1 className="text-xl font-display font-bold text-white tracking-tight">{t('app.title')}</h1>
-            <p className="text-xs text-slate-400 mt-0.5">{t('app.updatedAt', { date: LAST_UPDATED })}</p>
+        <div className="pointer-events-none absolute inset-0">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(99,102,241,0.18),transparent_34%),radial-gradient(circle_at_bottom_left,rgba(245,158,11,0.08),transparent_26%)]" />
+          <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.02),transparent_22%,rgba(255,255,255,0.015)_100%)]" />
         </div>
 
-        {/* Search Bar */}
-        <div className="p-3 border-b border-white/10">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input
-              type="text"
-              placeholder={t('search.placeholder')}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-slate-800/50 border border-white/10 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
-              >
-                <XIcon className="w-4 h-4" />
-              </button>
-            )}
+        <div className="relative flex h-full flex-col">
+          <div className="relative border-b border-white/[0.08] px-5 pt-6 pb-5">
+            <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(15,23,42,0.34),rgba(5,6,10,0))]" />
+            <div className="absolute inset-x-5 bottom-0 h-px bg-gradient-to-r from-transparent via-white/[0.14] to-transparent" />
+            <div className="relative">
+              <h1 className="max-w-[11ch] text-[2rem] font-display font-bold leading-[0.95] tracking-[-0.05em] text-white">
+                {t('app.title')}
+              </h1>
+              <div className="mt-4 inline-flex items-center rounded-full border border-white/[0.08] bg-white/[0.05] px-3 py-1.5 text-[11px] text-slate-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                {t('app.updatedAt', { date: LAST_UPDATED })}
+              </div>
+            </div>
           </div>
-        </div>
 
-        {/* Scrollable List */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 custom-scrollbar">
-            {filteredNodes.map((node, idx) => {
-                const isSelected = selectedNode?.id === node.id;
-                const isSharedSelected = isNodeInSharedSelection(node.id);
-                return (
-                    <div key={node.id} className="mb-1 flex items-stretch gap-1">
-                        <button
-                            ref={(el) => {
-                                if (el) itemRefs.current.set(node.id, el);
-                                else itemRefs.current.delete(node.id);
-                            }}
-                            onClick={() => handleNodeClick(node)}
-                            className={`flex-1 text-left p-3 rounded-xl flex items-center gap-3 transition-all duration-200 border ${isSelected ? 'bg-indigo-600/20 border-indigo-500/50 shadow-lg shadow-indigo-900/20' : 'hover:bg-white/5 border-transparent'}`}
-                        >
-                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${isSelected ? 'bg-indigo-500 text-white' : 'bg-slate-800 text-slate-400'}`}>
-                               {nodeRankMap.get(node.id)}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                                <div className="flex items-baseline gap-1.5 truncate">
-                                    <span className={`text-sm font-semibold ${isSelected ? 'text-white' : 'text-slate-200'}`}>
-                                        {node.name}
-                                    </span>
-                                    {node.handle && (
-                                        <span className="text-xs text-slate-500 font-mono truncate">
-                                            @{node.handle}
-                                        </span>
-                                    )}
-                                </div>
-                                <div className="flex items-center justify-between gap-2 mt-0.5">
-                                    <span className="text-xs text-slate-500 truncate flex-1">
-                                        {node.role
-                                          ? `${node.role}${node.associated && node.associated !== node.name ? ` @ ${node.associated}` : ''}`
-                                          : '\u00A0'}
-                                    </span>
-                                    <span className="text-[10px] text-slate-600 whitespace-nowrap shrink-0">
-                                        {node.followers
-                                          ? node.followers >= 1000000
-                                            ? `${(node.followers / 1000000).toFixed(1)}M`
-                                            : `${Math.round(node.followers / 1000)}K`
-                                          : t('common.connections', { count: node.val })}
-                                    </span>
-                                </div>
-                            </div>
-                        </button>
-                        <button
-                            onClick={() => toggleSharedSource(node)}
-                            aria-label={isSharedSelected ? t('shared.removeAria', { name: node.name }) : t('shared.addAria', { name: node.name })}
-                            className={`w-10 rounded-xl border transition-all duration-200 flex items-center justify-center ${isSharedSelected ? 'border-amber-400/60 bg-amber-400/15 text-amber-300' : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'}`}
-                            title={isSharedSelected ? t('shared.remove') : t('shared.add')}
-                        >
-                            {isSharedSelected ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-                        </button>
+          {/* Search Bar */}
+          <div className="border-b border-white/[0.06] px-4 py-4">
+            <div className="relative overflow-hidden rounded-[20px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(18,24,36,0.92),rgba(10,14,22,0.96))] shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_16px_32px_rgba(0,0,0,0.18)]">
+              <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.035),transparent_60%)]" />
+              <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+              <input
+                type="text"
+                placeholder={t('search.placeholder')}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="h-12 w-full bg-transparent pl-11 pr-11 text-sm text-white placeholder-slate-500 focus:outline-none"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-3 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-white/[0.05] text-slate-400 transition-colors hover:bg-white/[0.1] hover:text-white"
+                >
+                  <XIcon className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Scrollable List */}
+          <div ref={listContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden px-3 py-4 custom-scrollbar">
+            {filteredNodes.map((node) => {
+              const isSelected = selectedNode?.id === node.id;
+              const isSharedSelected = isNodeInSharedSelection(node.id);
+              const rowAppearance = getSidebarRowAppearance(isSelected);
+              const toggleAppearance = getSharedToggleAppearance(isSharedSelected);
+              const metricText = node.followers
+                ? formatNumber(node.followers)
+                : t('common.connections', { count: node.val });
+
+              return (
+                <div key={node.id} className="mb-2 flex items-stretch gap-2.5">
+                  <button
+                    ref={(el) => {
+                      if (el) itemRefs.current.set(node.id, el);
+                      else itemRefs.current.delete(node.id);
+                    }}
+                    onClick={() => handleNodeClick(node)}
+                    className={`group relative flex min-h-[92px] flex-1 items-start gap-3.5 overflow-hidden rounded-[24px] p-3.5 text-left transition-all duration-300 ${rowAppearance.rowClasses}`}
+                  >
+                    <div className={`mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-[18px] text-sm font-bold ${rowAppearance.rankClasses}`}>
+                      {nodeRankMap.get(node.id)}
                     </div>
-                )
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                        <span className={`text-[18px] font-semibold leading-none tracking-[-0.03em] ${rowAppearance.nameClasses}`}>
+                          {node.name}
+                        </span>
+                        {node.handle && (
+                          <span className={`max-w-full truncate text-xs font-mono ${rowAppearance.handleClasses}`}>
+                            @{node.handle}
+                          </span>
+                        )}
+                      </div>
+                      <div className={`mt-2 min-h-[38px] text-[13px] leading-5 ${rowAppearance.metaClasses}`}>
+                        {node.role
+                          ? `${node.role}${node.associated && node.associated !== node.name ? ` @ ${node.associated}` : ''}`
+                          : '\u00A0'}
+                      </div>
+                      <div className="mt-3 flex items-center">
+                        <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium ${rowAppearance.metricClasses}`}>
+                          {metricText}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="pointer-events-none absolute inset-x-4 bottom-0 h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent opacity-70 transition-opacity duration-300 group-hover:opacity-0" />
+                  </button>
+                  <button
+                    onClick={() => toggleSharedSource(node)}
+                    aria-label={isSharedSelected ? t('shared.removeAria', { name: node.name }) : t('shared.addAria', { name: node.name })}
+                    className={`shrink-0 flex items-center justify-center transition-all duration-300 ${toggleAppearance.buttonClasses}`}
+                    title={isSharedSelected ? t('shared.remove') : t('shared.add')}
+                  >
+                    {toggleAppearance.icon === 'check' ? (
+                      <Check className={toggleAppearance.iconClasses} />
+                    ) : (
+                      <Plus className={toggleAppearance.iconClasses} />
+                    )}
+                  </button>
+                </div>
+              );
             })}
-        </div>
+          </div>
 
-        {/* Creator Profile */}
-        <div className="border-t border-white/10 bg-[#05060A]/50 p-2">
-          <button
-            onClick={() => {
-              setSelectedNode(null);
-              setShowCreatorCard(true);
-            }}
-            className={`w-full text-left p-3 rounded-xl flex items-center gap-3 transition-all duration-200 border ${showCreatorCard ? 'bg-indigo-600/20 border-indigo-500/50' : 'hover:bg-white/5 border-transparent'}`}
-          >
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${showCreatorCard ? 'bg-indigo-500 text-white' : 'bg-slate-800 text-slate-400'}`}>
-              x
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-baseline gap-1.5 truncate">
-                <span className={`text-sm font-semibold ${showCreatorCard ? 'text-white' : 'text-slate-200'}`}>
-                  Jenny
-                </span>
-                <span className="text-xs text-slate-500 font-mono truncate">
-                  @Jenny_the_Bunny
-                </span>
+          {/* Creator Profile */}
+          <div className="border-t border-white/[0.08] px-3 py-3 bg-[linear-gradient(180deg,rgba(255,255,255,0.025),rgba(255,255,255,0.01))]">
+            <button
+              onClick={() => {
+                setSelectedNode(null);
+                setShowCreatorCard(true);
+              }}
+              className={`group w-full overflow-hidden rounded-[24px] p-3.5 text-left transition-all duration-300 ${creatorRowAppearance.rowClasses}`}
+            >
+              <div className="flex items-start gap-3.5">
+                <div className={`mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-[18px] text-sm font-bold ${creatorRowAppearance.rankClasses}`}>
+                  X
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                    <span className={`text-[18px] font-semibold leading-none tracking-[-0.03em] ${creatorRowAppearance.nameClasses}`}>
+                      Jenny
+                    </span>
+                    <span className={`max-w-full truncate text-xs font-mono ${creatorRowAppearance.handleClasses}`}>
+                      @Jenny_the_Bunny
+                    </span>
+                  </div>
+                  <div className={`mt-2 text-[13px] leading-5 ${creatorRowAppearance.metaClasses}`}>
+                    {t('creator.role')}
+                  </div>
+                </div>
               </div>
-              <div className="flex items-center gap-2 mt-0.5">
-                <span className="text-xs text-slate-500 truncate">
-                  {t('creator.role')}
-                </span>
-              </div>
-            </div>
-          </button>
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Sidebar Toggle Button */}
       <button
         onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-        className={`absolute top-6 z-40 p-2 bg-slate-800/80 text-white border border-white/10 rounded-r-lg hover:bg-slate-700 transition-all duration-300 ${isMobile ? (isSidebarOpen ? 'left-72' : 'left-0') : (isSidebarOpen ? 'left-80' : 'left-0')}`}
+        className={sidebarToggleButtonClasses}
       >
-        {isSidebarOpen ? <ChevronLeft className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+        {isSidebarOpen ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
       </button>
 
 
