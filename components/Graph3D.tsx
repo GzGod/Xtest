@@ -10,9 +10,25 @@ interface Graph3DProps {
   onClearSelection: () => void;
   selectedNode?: GraphNode | null;
   keepOrphans?: boolean;
+  labels?: {
+    zoomOut: string;
+    resetView: string;
+    zoomIn: string;
+  };
 }
 
-const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onClearSelection, selectedNode, keepOrphans = false }) => {
+const Graph3D: React.FC<Graph3DProps> = ({
+  data,
+  onNodeClick,
+  onClearSelection,
+  selectedNode,
+  keepOrphans = false,
+  labels = {
+    zoomOut: 'Zoom Out',
+    resetView: 'Reset View',
+    zoomIn: 'Zoom In',
+  },
+}) => {
   const graphRef = useRef<ForceGraphMethods>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const labelsRef = useRef<Map<string, { element: HTMLDivElement; object: THREE.Object3D }>>(new Map());
@@ -454,14 +470,14 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onClearSelection, 
         <button
           onClick={handleZoomOut}
           className="px-4 py-2 text-white hover:bg-white/10 transition-colors border-r border-white/10"
-          title="Zoom Out"
+          title={labels.zoomOut}
         >
-          <span className="text-lg font-light">−</span>
+          <span className="text-lg font-light">-</span>
         </button>
         <button
           onClick={handleResetView}
           className="px-4 py-2 text-white hover:bg-white/10 transition-colors border-r border-white/10"
-          title="Reset View"
+          title={labels.resetView}
         >
           <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
@@ -471,7 +487,7 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onClearSelection, 
         <button
           onClick={handleZoomIn}
           className="px-4 py-2 text-white hover:bg-white/10 transition-colors"
-          title="Zoom In"
+          title={labels.zoomIn}
         >
           <span className="text-lg font-light">+</span>
         </button>

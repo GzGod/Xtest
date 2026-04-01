@@ -2,21 +2,29 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import Graph3D from './components/Graph3D';
 import { INITIAL_DATA, LAST_UPDATED } from './constants';
 import { SHARED_FOLLOWING_DATA } from './sharedFollowingData';
+import { DEFAULT_LOCALE, ENGLISH_LOCALE, LOCALE_STORAGE_KEY, createTranslator, resolveInitialLocale } from './services/i18n.js';
 import { computeSharedCandidates, mergeSharedCandidatesIntoGraph } from './services/sharedFollowing.js';
 import { GraphData, GraphNode, SharedFollowingCandidateNode, SharedFollowingMode } from './types';
 import { X as XIcon, Building2, Link2, ChevronLeft, ChevronRight, Menu, Calendar, BadgeCheck, MapPin, Search, HelpCircle, Sparkles, Users, RotateCcw, Plus, Check, Layers } from 'lucide-react';
 
-// Creator profile
-const CREATOR_PROFILE: GraphNode = {
+const CATEGORY_LEGEND = [
+  { key: 'company', color: '#FFD4A3', labelKey: 'legend.company' },
+  { key: 'founder', color: '#A3D4FF', labelKey: 'legend.founder' },
+  { key: 'researcher', color: '#E0B3FF', labelKey: 'legend.researcher' },
+  { key: 'investor', color: '#B3FFB3', labelKey: 'legend.investor' },
+  { key: 'media', color: '#FFB3D9', labelKey: 'legend.media' },
+] as const;
+
+const createCreatorProfile = (t: ReturnType<typeof createTranslator>): GraphNode => ({
   id: 'jenny_the_bunny',
   name: 'Jenny',
   handle: 'Jenny_the_Bunny',
   group: 'founder',
-  role: 'Creator of this page',
-  bio: 'Building cool things with AI. Creator of this AI influencer page. Let\'s be friends on X!',
-  joinedDate: 'Mar 2015 but never used until Feb 2026',
+  role: t('creator.role'),
+  bio: t('creator.bio'),
+  joinedDate: t('creator.joined'),
   verified: 'blue',
-};
+});
 
 export default function App() {
   const [data] = useState<GraphData>(INITIAL_DATA);
@@ -24,6 +32,10 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 768);
   const [isLegendOpen, setIsLegendOpen] = useState(true);
   const [showMethodology, setShowMethodology] = useState(false);
+  const [locale, setLocale] = useState(() => {
+    const savedLocale = window.localStorage.getItem(LOCALE_STORAGE_KEY);
+    return resolveInitialLocale(savedLocale, window.navigator.language);
+  });
 
   // Selection State
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
@@ -42,6 +54,14 @@ export default function App() {
   // Refs for scrolling
   const listContainerRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const t = useMemo(() => createTranslator(locale), [locale]);
+  const creatorProfile = useMemo(() => createCreatorProfile(t), [t]);
+  const categoryLegend = useMemo(() => (
+    CATEGORY_LEGEND.map((category) => ({
+      ...category,
+      label: t(category.labelKey),
+    }))
+  ), [t]);
 
   // Handle responsive layout
   useEffect(() => {
@@ -57,6 +77,11 @@ export default function App() {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(LOCALE_STORAGE_KEY, locale);
+    document.documentElement.lang = locale;
+  }, [locale]);
 
   // 1. Calculate Statistics & Sort Nodes by Followers (or connections as fallback)
   const sortedNodes = useMemo(() => {
@@ -275,15 +300,38 @@ export default function App() {
         onClearSelection={closeSelection}
         selectedNode={selectedNode}
         keepOrphans={!!selectedCategory}
+        labels={{
+          zoomOut: t('graph.zoomOut'),
+          resetView: t('graph.reset'),
+          zoomIn: t('graph.zoomIn'),
+        }}
       />
+
+      <div className={`absolute z-40 pointer-events-auto ${isMobile ? 'top-4 right-4' : 'top-6 right-6'}`}>
+        <div className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-[#05060A]/80 p-1 backdrop-blur-xl shadow-lg">
+          <span className="px-2 text-[11px] font-medium text-slate-400">{t('language.switcher')}</span>
+          <button
+            onClick={() => setLocale(DEFAULT_LOCALE)}
+            className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${locale === DEFAULT_LOCALE ? 'bg-white text-black' : 'text-slate-300 hover:bg-white/10'}`}
+          >
+            {t('language.zh')}
+          </button>
+          <button
+            onClick={() => setLocale(ENGLISH_LOCALE)}
+            className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${locale === ENGLISH_LOCALE ? 'bg-white text-black' : 'text-slate-300 hover:bg-white/10'}`}
+          >
+            {t('language.en')}
+          </button>
+        </div>
+      </div>
 
       {/* LEFT SIDEBAR - RANKED LIST */}
       <div
         className={`absolute top-0 left-0 h-full bg-[#05060A]/80 backdrop-blur-xl border-r border-white/10 z-30 transition-all duration-300 ease-in-out flex flex-col ${isMobile ? (isSidebarOpen ? 'w-72 translate-x-0' : 'w-72 -translate-x-72') : (isSidebarOpen ? 'w-80 translate-x-0' : 'w-80 -translate-x-80')}`}
       >
         <div className="px-4 py-3 border-b border-white/10 bg-[#05060A]/50">
-            <h1 className="text-xl font-display font-bold text-white tracking-tight">Top AI Influencers on X</h1>
-            <p className="text-xs text-slate-400 mt-0.5">Data last updated: {LAST_UPDATED}</p>
+            <h1 className="text-xl font-display font-bold text-white tracking-tight">{t('app.title')}</h1>
+            <p className="text-xs text-slate-400 mt-0.5">{t('app.updatedAt', { date: LAST_UPDATED })}</p>
         </div>
 
         {/* Search Bar */}
@@ -292,7 +340,7 @@ export default function App() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
               type="text"
-              placeholder="Search by name, handle, or role..."
+              placeholder={t('search.placeholder')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-10 pr-4 py-2 bg-slate-800/50 border border-white/10 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50"
@@ -348,16 +396,16 @@ export default function App() {
                                           ? node.followers >= 1000000
                                             ? `${(node.followers / 1000000).toFixed(1)}M`
                                             : `${Math.round(node.followers / 1000)}K`
-                                          : `${node.val} conn.`}
+                                          : t('common.connections', { count: node.val })}
                                     </span>
                                 </div>
                             </div>
                         </button>
                         <button
                             onClick={() => toggleSharedSource(node)}
-                            aria-label={isSharedSelected ? `Remove ${node.name} from shared following` : `Add ${node.name} to shared following`}
+                            aria-label={isSharedSelected ? t('shared.removeAria', { name: node.name }) : t('shared.addAria', { name: node.name })}
                             className={`w-10 rounded-xl border transition-all duration-200 flex items-center justify-center ${isSharedSelected ? 'border-amber-400/60 bg-amber-400/15 text-amber-300' : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'}`}
-                            title={isSharedSelected ? 'Remove from shared following' : 'Add to shared following'}
+                            title={isSharedSelected ? t('shared.remove') : t('shared.add')}
                         >
                             {isSharedSelected ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
                         </button>
@@ -389,7 +437,7 @@ export default function App() {
               </div>
               <div className="flex items-center gap-2 mt-0.5">
                 <span className="text-xs text-slate-500 truncate">
-                  Creator of this page
+                  {t('creator.role')}
                 </span>
               </div>
             </div>
@@ -433,11 +481,11 @@ export default function App() {
                         <div className="flex justify-between items-start">
                             <div className="relative -mt-12 mb-3">
                                 <img
-                                    src={getProfileImage(CREATOR_PROFILE)}
-                                    alt={CREATOR_PROFILE.name}
+                                    src={getProfileImage(creatorProfile)}
+                                    alt={creatorProfile.name}
                                     onError={(e) => {
                                         e.currentTarget.onerror = null;
-                                        e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(CREATOR_PROFILE.name)}&background=1e293b&color=cbd5e1&size=128`;
+                                        e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(creatorProfile.name)}&background=1e293b&color=cbd5e1&size=128`;
                                     }}
                                     className="w-20 h-20 rounded-full border-4 border-[#090A10] object-cover bg-slate-800 shadow-lg"
                                 />
@@ -445,34 +493,34 @@ export default function App() {
 
                             {/* Follow Button */}
                             <a
-                                href={`https://x.com/${CREATOR_PROFILE.handle}`}
+                                href={`https://x.com/${creatorProfile.handle}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="mt-3 px-5 py-2 bg-white hover:bg-white/90 text-black font-bold text-sm rounded-full transition-all"
                             >
-                                Follow
+                                {t('common.follow')}
                             </a>
                         </div>
 
                         {/* Name & Handle */}
                         <div className="mb-3">
                             <h2 className="text-xl font-bold text-white flex items-center gap-1.5">
-                                {CREATOR_PROFILE.name}
+                                {creatorProfile.name}
                                 <BadgeCheck className="w-5 h-5 text-blue-400 fill-blue-400/20" />
                             </h2>
-                            <div className="text-slate-500 text-sm">@{CREATOR_PROFILE.handle}</div>
+                            <div className="text-slate-500 text-sm">@{creatorProfile.handle}</div>
                         </div>
 
                         {/* Bio */}
                         <p className="text-sm text-slate-200 leading-relaxed mb-3">
-                            {CREATOR_PROFILE.bio}
+                            {creatorProfile.bio}
                         </p>
 
                         {/* Meta Info Row */}
                         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500 mb-4">
                             <div className="flex items-center gap-1">
                                 <Calendar className="w-4 h-4" />
-                                <span>Joined {CREATOR_PROFILE.joinedDate}</span>
+                                <span>{t('common.joined', { value: creatorProfile.joinedDate })}</span>
                             </div>
                         </div>
 
@@ -525,7 +573,7 @@ export default function App() {
                                     rel="noopener noreferrer"
                                     className="mt-3 px-5 py-2 bg-white hover:bg-white/90 text-black font-bold text-sm rounded-full transition-all"
                                 >
-                                    Follow
+                                    {t('common.follow')}
                                 </a>
                             )}
                         </div>
@@ -569,7 +617,7 @@ export default function App() {
                             {selectedNode.joinedDate && (
                                 <div className="flex items-center gap-1">
                                     <Calendar className="w-4 h-4" />
-                                    <span>Joined {selectedNode.joinedDate}</span>
+                                    <span>{t('common.joined', { value: selectedNode.joinedDate })}</span>
                                 </div>
                             )}
                         </div>
@@ -580,13 +628,13 @@ export default function App() {
                                 {selectedNode.following !== undefined && (
                                     <div>
                                         <span className="font-bold text-white">{formatNumber(selectedNode.following)}</span>
-                                        <span className="text-slate-500 ml-1">Following</span>
+                                        <span className="text-slate-500 ml-1">{t('common.following')}</span>
                                     </div>
                                 )}
                                 {selectedNode.followers !== undefined && (
                                     <div>
                                         <span className="font-bold text-white">{formatNumber(selectedNode.followers)}</span>
-                                        <span className="text-slate-500 ml-1">Followers</span>
+                                        <span className="text-slate-500 ml-1">{t('common.followers')}</span>
                                     </div>
                                 )}
                             </div>
@@ -596,18 +644,15 @@ export default function App() {
                             <div className="mt-4 space-y-3">
                                 <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-400/10 border border-amber-400/20 text-amber-200 text-xs font-medium">
                                     <Sparkles className="w-3.5 h-3.5" />
-                                    Shared-following candidate
+                                    {t('shared.candidateBadge')}
                                 </div>
                                 <div className="text-xs text-slate-400 leading-relaxed">
-                                    Followed by{' '}
-                                    <span className="text-white font-medium">{selectedNode.sharedFollowerCount || 0}</span>
-                                    {' '}selected core accounts:
-                                    {' '}
-                                    <span className="text-slate-200">
-                                      {(selectedNode.followedBySelectedIds || [])
+                                    {t('shared.candidateDetails', {
+                                      count: selectedNode.sharedFollowerCount || 0,
+                                      accounts: (selectedNode.followedBySelectedIds || [])
                                         .map((nodeId) => coreNodeById.get(nodeId)?.handle || coreNodeById.get(nodeId)?.name || nodeId)
-                                        .join(', ')}
-                                    </span>
+                                        .join(', '),
+                                    })}
                                 </div>
                             </div>
                         )}
@@ -619,7 +664,7 @@ export default function App() {
                                     className={`inline-flex items-center gap-2 px-4 py-2 rounded-full border text-sm font-medium transition-all ${isNodeInSharedSelection(selectedNode.id) ? 'border-amber-400/50 bg-amber-400/15 text-amber-200' : 'border-white/10 bg-white/5 text-slate-200 hover:bg-white/10'}`}
                                 >
                                     {isNodeInSharedSelection(selectedNode.id) ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-                                    {isNodeInSharedSelection(selectedNode.id) ? 'Added to shared following' : 'Add to shared following'}
+                                    {isNodeInSharedSelection(selectedNode.id) ? t('shared.added') : t('shared.add')}
                                 </button>
                             </div>
                         )}
@@ -639,14 +684,14 @@ export default function App() {
                 <div>
                   <div className="flex items-center gap-2 text-white font-semibold">
                     <Users className="w-4 h-4 text-amber-300" />
-                    Shared Following
+                    {t('shared.title')}
                   </div>
                   <div className="text-xs text-slate-400 mt-1">
                     {sharedSelectedNodes.map((node) => node.handle || node.name).join(', ')}
                   </div>
                 </div>
                 <div className="text-xs text-slate-400 whitespace-nowrap">
-                  {selectedSharedSourceIds.length} selected
+                  {t('shared.selectedCount', { count: selectedSharedSourceIds.length })}
                 </div>
               </div>
             </div>
@@ -654,33 +699,33 @@ export default function App() {
             <div className="px-4 py-3 space-y-3">
               <div className="grid grid-cols-2 gap-2">
                 <label className="text-xs text-slate-400">
-                  Mode
+                  {t('shared.mode')}
                   <select
                     value={sharedFollowingMode}
                     onChange={(e) => setSharedFollowingMode(e.target.value as SharedFollowingMode)}
                     className="mt-1 w-full rounded-lg border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-white focus:outline-none"
                   >
-                    <option value="threshold">Threshold</option>
-                    <option value="strict">Strict</option>
+                    <option value="threshold">{t('shared.modeThreshold')}</option>
+                    <option value="strict">{t('shared.modeStrict')}</option>
                   </select>
                 </label>
                 <label className="text-xs text-slate-400">
-                  Expand
+                  {t('shared.expand')}
                   <select
                     value={candidateLimit}
                     onChange={(e) => setCandidateLimit(Number(e.target.value))}
                     className="mt-1 w-full rounded-lg border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-white focus:outline-none"
                   >
-                    <option value={10}>Top 10</option>
-                    <option value={20}>Top 20</option>
-                    <option value={50}>Top 50</option>
+                    <option value={10}>{t('shared.topN', { count: 10 })}</option>
+                    <option value={20}>{t('shared.topN', { count: 20 })}</option>
+                    <option value={50}>{t('shared.topN', { count: 50 })}</option>
                   </select>
                 </label>
               </div>
 
               {sharedFollowingMode === 'threshold' && (
                 <label className="block text-xs text-slate-400">
-                  Minimum shared follows
+                  {t('shared.minSharedCount')}
                   <select
                     value={Math.min(minSharedCount, Math.max(1, selectedSharedSourceIds.length))}
                     onChange={(e) => setMinSharedCount(Number(e.target.value))}
@@ -688,7 +733,7 @@ export default function App() {
                   >
                     {Array.from({ length: selectedSharedSourceIds.length }, (_, index) => index + 1).map((count) => (
                       <option key={count} value={count}>
-                        At least {count}
+                        {t('shared.atLeastCount', { count })}
                       </option>
                     ))}
                   </select>
@@ -702,14 +747,14 @@ export default function App() {
                   className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold transition-colors ${hasSharedFollowingDataset ? 'bg-amber-300 text-black hover:bg-amber-200' : 'bg-amber-300/40 text-slate-900/70 cursor-not-allowed'}`}
                 >
                   <Sparkles className="w-4 h-4" />
-                  Find Shared Following
+                  {t('shared.find')}
                 </button>
                 <button
                   onClick={handleClearSharedSelection}
                   className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-white/10 bg-white/5 text-slate-200 text-sm hover:bg-white/10 transition-colors"
                 >
                   <RotateCcw className="w-4 h-4" />
-                  Clear Selection
+                  {t('shared.clearSelection')}
                 </button>
                 {expandedCandidates.length > 0 && (
                   <button
@@ -717,20 +762,23 @@ export default function App() {
                     className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-white/10 bg-white/5 text-slate-200 text-sm hover:bg-white/10 transition-colors"
                   >
                     <Layers className="w-4 h-4" />
-                    Collapse Candidates
+                    {t('shared.collapseCandidates')}
                   </button>
                 )}
               </div>
 
               {!hasSharedFollowingDataset && (
                 <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-slate-300">
-                  Shared-following dataset is not loaded yet. Run <span className="font-mono text-amber-200">npm run generate-shared-following</span> with <span className="font-mono text-amber-200">XAPI_API_KEY</span> to populate outside-candidate data.
+                  {t('shared.datasetMissing', {
+                    command: 'npm run generate-shared-following',
+                    env: 'XAPI_API_KEY',
+                  })}
                 </div>
               )}
 
               {hasSharedFollowingDataset && hasComputedSharedFollowing && computedSharedCandidates.length === 0 && (
                 <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-slate-300">
-                  No shared-following candidates matched the current rules. Try lowering the minimum shared count or turning off strict mode.
+                  {t('shared.empty')}
                 </div>
               )}
 
@@ -738,10 +786,13 @@ export default function App() {
                 <div className="rounded-xl border border-white/10 bg-white/[0.03]">
                   <div className="px-3 py-2 border-b border-white/10 flex items-center justify-between gap-3">
                     <div className="text-sm text-white font-medium">
-                      Candidate Results
+                      {t('shared.resultsTitle')}
                     </div>
                     <div className="text-xs text-slate-400">
-                      Showing {expandedCandidates.length} of {computedSharedCandidates.length}
+                      {t('shared.resultsShowing', {
+                        shown: expandedCandidates.length,
+                        total: computedSharedCandidates.length,
+                      })}
                     </div>
                   </div>
                   <div className="max-h-72 overflow-y-auto custom-scrollbar">
@@ -765,15 +816,15 @@ export default function App() {
                           </div>
                         </div>
                         <div className="mt-1 text-xs text-slate-400 line-clamp-2">
-                          {candidate.bio || candidate.role || 'No bio available'}
+                          {candidate.bio || candidate.role || t('common.noBio')}
                         </div>
                         <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
                           <span className="px-2 py-1 rounded-full bg-amber-300/10 text-amber-200 border border-amber-300/15">
-                            {candidate.sharedFollowerCount} shared follows
+                            {t('shared.sharedFollows', { count: candidate.sharedFollowerCount })}
                           </span>
                           {candidate.isLikelyCommercialKOL && (
                             <span className="px-2 py-1 rounded-full bg-emerald-400/10 text-emerald-200 border border-emerald-400/15">
-                              KOL leaning
+                              {t('shared.kolLeaning')}
                             </span>
                           )}
                         </div>
@@ -788,22 +839,16 @@ export default function App() {
       )}
 
       {/* Legend */}
-      <div className={`absolute z-20 bg-[#0B0C15]/80 backdrop-blur-md border border-white/10 rounded-xl transition-all duration-300 ease-in-out ${isMobile ? 'top-4 right-4' : 'bottom-6 right-6'} ${isLegendOpen ? 'p-4' : 'p-2'}`}>
+      <div className={`absolute z-20 bg-[#0B0C15]/80 backdrop-blur-md border border-white/10 rounded-xl transition-all duration-300 ease-in-out ${isMobile ? 'top-20 right-4' : 'bottom-6 right-6'} ${isLegendOpen ? 'p-4' : 'p-2'}`}>
         <button
           onClick={() => setIsLegendOpen(!isLegendOpen)}
           className="flex items-center gap-2 w-full text-left"
         >
-          <div className="text-xs text-slate-400 uppercase tracking-wider font-medium">Legend</div>
+          <div className="text-xs text-slate-400 uppercase tracking-wider font-medium">{t('legend.title')}</div>
           <ChevronRight className={`w-3 h-3 text-slate-400 transition-transform duration-300 ${isLegendOpen ? 'rotate-90' : ''}`} />
         </button>
         <div className={`flex flex-col gap-1 overflow-hidden transition-all duration-300 ease-in-out ${isLegendOpen ? 'mt-3 max-h-60 opacity-100' : 'max-h-0 opacity-0'}`}>
-          {[
-            { key: 'company', color: '#FFD4A3', label: 'Company / Organization' },
-            { key: 'founder', color: '#A3D4FF', label: 'Founder / Builder' },
-            { key: 'researcher', color: '#E0B3FF', label: 'Researcher / Academia' },
-            { key: 'investor', color: '#B3FFB3', label: 'Investor' },
-            { key: 'media', color: '#FFB3D9', label: 'Media' },
-          ].map(cat => (
+          {categoryLegend.map(cat => (
             <button
               key={cat.key}
               onClick={() => handleCategoryClick(cat.key)}
@@ -818,13 +863,13 @@ export default function App() {
               onClick={() => { setSelectedCategory(null); setSelectedNode(null); }}
               className="text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors mt-1 px-2"
             >
-              Clear filter
+              {t('common.clearFilter')}
             </button>
           )}
           {expandedCandidates.length > 0 && (
             <div className="flex items-center gap-2 px-2 py-1 rounded-md bg-amber-300/5 border border-amber-300/10">
               <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: '#F6D365', boxShadow: '0 0 8px #F6D365' }} />
-              <span className="text-xs text-amber-100">Shared-following candidates</span>
+              <span className="text-xs text-amber-100">{t('legend.candidate')}</span>
             </div>
           )}
           <div className="border-t border-white/10 my-2" />
@@ -833,7 +878,7 @@ export default function App() {
             className="flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
           >
             <HelpCircle className="w-3.5 h-3.5" />
-            <span>Methodology</span>
+            <span>{t('legend.methodology')}</span>
           </button>
         </div>
       </div>
@@ -851,7 +896,7 @@ export default function App() {
           <div className="relative bg-[#0B0C15] border border-white/10 rounded-2xl shadow-2xl max-w-lg w-full max-h-[80vh] overflow-y-auto custom-scrollbar">
             {/* Header */}
             <div className="sticky top-0 bg-[#0B0C15] border-b border-white/10 px-6 py-4 flex items-center justify-between">
-              <h2 className="text-lg font-bold text-white">Methodology</h2>
+              <h2 className="text-lg font-bold text-white">{t('method.title')}</h2>
               <button
                 onClick={() => setShowMethodology(false)}
                 className="p-1.5 hover:bg-white/10 rounded-full text-slate-400 hover:text-white transition-colors"
@@ -863,42 +908,42 @@ export default function App() {
             {/* Content */}
             <div className="px-5 py-3 space-y-2.5">
               <div>
-                <h3 className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-1">Discovery & Selection</h3>
+                <h3 className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-1">{t('method.discoveryTitle')}</h3>
                 <p className="text-xs text-slate-300 leading-relaxed">
-                  Starting from <span className="text-white font-medium">seed accounts</span> (OpenAI, Anthropic, DeepMind, top researchers), we crawl who they follow to find AI voices. If multiple trusted sources follow someone, they matter. The top 300 are selected using:
+                  {t('method.discoveryBody')}
                 </p>
                 <div className="bg-slate-800/50 border border-white/10 rounded-md px-2.5 py-1.5 font-mono text-xs text-white mt-1.5 mb-1">
-                  Score = log<sub>10</sub>(followers) x seed_connections
+                  {t('method.scoreFormula')}
                 </div>
                 <p className="text-xs text-slate-400">
-                  Log scale prevents mega-accounts from dominating. Minimum 1K followers, AI keywords in bio, blocklist for general media.
+                  {t('method.discoveryNote')}
                 </p>
               </div>
 
               <div>
-                <h3 className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-1">Graph & Connections</h3>
+                <h3 className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-1">{t('method.graphTitle')}</h3>
                 <p className="text-xs text-slate-300 leading-relaxed">
-                  The default view shows all connections. <span className="text-white font-medium">Click a node</span> to see who they follow. Node sizes reflect followers. Filter by category using the legend.
+                  {t('method.graphBody')}
                 </p>
               </div>
 
               <div>
-                <h3 className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-1">Shared Following Discovery</h3>
+                <h3 className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-1">{t('method.sharedTitle')}</h3>
                 <p className="text-xs text-slate-300 leading-relaxed">
-                  Add one or more Top300 nodes to the <span className="text-white font-medium">shared following</span> pool, then run the finder to surface outside accounts commonly followed by those selected insiders. Gold nodes are temporary discovery candidates, not permanent Top300 entries.
+                  {t('method.sharedBody')}
                 </p>
               </div>
 
               <div className="pt-2 border-t border-white/10">
                 <p className="text-xs text-slate-400">
-                  This methodology may not be perfect. Have ideas?{' '}
+                  {t('method.feedback')}{' '}
                   <a
                     href="https://x.com/Jenny_the_Bunny"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-indigo-400 hover:text-indigo-300"
                   >
-                    Hit me up on X
+                    {t('method.feedbackLink')}
                   </a>
                 </p>
               </div>
