@@ -1,8 +1,10 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import Graph3D from './components/Graph3D';
 import { INITIAL_DATA, LAST_UPDATED } from './constants';
-import { GraphData, GraphNode } from './types';
-import { X as XIcon, ExternalLink, Building2, Link2, ChevronLeft, ChevronRight, Menu, Calendar, BadgeCheck, MapPin, Search, HelpCircle } from 'lucide-react';
+import { SHARED_FOLLOWING_DATA } from './sharedFollowingData';
+import { computeSharedCandidates, mergeSharedCandidatesIntoGraph } from './services/sharedFollowing.js';
+import { GraphData, GraphNode, SharedFollowingCandidateNode, SharedFollowingMode } from './types';
+import { X as XIcon, Building2, Link2, ChevronLeft, ChevronRight, Menu, Calendar, BadgeCheck, MapPin, Search, HelpCircle, Sparkles, Users, RotateCcw, Plus, Check, Layers } from 'lucide-react';
 
 // Creator profile
 const CREATOR_PROFILE: GraphNode = {
@@ -26,6 +28,12 @@ export default function App() {
   // Selection State
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [showCreatorCard, setShowCreatorCard] = useState(false);
+  const [selectedSharedSourceIds, setSelectedSharedSourceIds] = useState<string[]>([]);
+  const [sharedFollowingMode, setSharedFollowingMode] = useState<SharedFollowingMode>('threshold');
+  const [minSharedCount, setMinSharedCount] = useState(2);
+  const [candidateLimit, setCandidateLimit] = useState(20);
+  const [expandedCandidates, setExpandedCandidates] = useState<SharedFollowingCandidateNode[]>([]);
+  const [hasComputedSharedFollowing, setHasComputedSharedFollowing] = useState(false);
 
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
@@ -79,6 +87,30 @@ export default function App() {
     return map;
   }, [sortedNodes]);
 
+  const coreNodeById = useMemo(() => {
+    return new Map(data.nodes.map((node) => [node.id, node]));
+  }, [data.nodes]);
+
+  const sharedSelectedNodes = useMemo(() => {
+    return selectedSharedSourceIds
+      .map((nodeId) => coreNodeById.get(nodeId))
+      .filter((node): node is GraphNode => Boolean(node));
+  }, [selectedSharedSourceIds, coreNodeById]);
+
+  const computedSharedCandidates = useMemo<SharedFollowingCandidateNode[]>(() => {
+    return computeSharedCandidates({
+      selectedSourceIds: selectedSharedSourceIds,
+      externalFollowingBySource: SHARED_FOLLOWING_DATA.externalFollowingBySource,
+      candidateNodesById: SHARED_FOLLOWING_DATA.candidateNodesById,
+      mode: sharedFollowingMode,
+      minSharedCount,
+    }) as SharedFollowingCandidateNode[];
+  }, [selectedSharedSourceIds, sharedFollowingMode, minSharedCount]);
+
+  const hasSharedFollowingDataset = useMemo(() => {
+    return Object.keys(SHARED_FOLLOWING_DATA.externalFollowingBySource || {}).length > 0;
+  }, []);
+
   // Filter nodes based on search query and selected category
   const filteredNodes = useMemo(() => {
     let nodes = sortedNodes;
@@ -127,6 +159,17 @@ export default function App() {
     };
   }, [data, selectedCategory]);
 
+  const displayedGraphData = useMemo(() => {
+    if (expandedCandidates.length === 0) {
+      return filteredGraphData;
+    }
+
+    return mergeSharedCandidatesIntoGraph({
+      baseData: filteredGraphData,
+      candidates: expandedCandidates,
+    });
+  }, [filteredGraphData, expandedCandidates]);
+
   // Scroll to selected node in the sidebar
   useEffect(() => {
     if (selectedNode && itemRefs.current.has(selectedNode.id)) {
@@ -134,6 +177,11 @@ export default function App() {
       element?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
   }, [selectedNode]);
+
+  useEffect(() => {
+    setExpandedCandidates([]);
+    setHasComputedSharedFollowing(false);
+  }, [selectedSharedSourceIds, sharedFollowingMode, minSharedCount]);
 
   const nodeCount = data?.nodes?.length || 0;
   const linkCount = data?.links?.length || 0;
@@ -151,6 +199,32 @@ export default function App() {
     }
   };
 
+  const toggleSharedSource = (node: GraphNode) => {
+    if (node.isExternalCandidate) {
+      return;
+    }
+
+    setSelectedSharedSourceIds((currentIds) =>
+      currentIds.includes(node.id)
+        ? currentIds.filter((nodeId) => nodeId !== node.id)
+        : [...currentIds, node.id]
+    );
+  };
+
+  const handleFindSharedFollowing = () => {
+    setHasComputedSharedFollowing(true);
+    setExpandedCandidates(computedSharedCandidates.slice(0, candidateLimit));
+  };
+
+  const handleClearSharedSelection = () => {
+    setSelectedSharedSourceIds([]);
+    setExpandedCandidates([]);
+    setHasComputedSharedFollowing(false);
+  };
+
+  const handleCollapseCandidates = () => {
+    setExpandedCandidates([]);
+  };
 
   const closeSelection = () => {
     setSelectedNode(null);
@@ -161,6 +235,9 @@ export default function App() {
     setSelectedCategory(prev => prev === category ? null : category);
     setSelectedNode(null);
     setShowCreatorCard(false);
+    setSelectedSharedSourceIds([]);
+    setExpandedCandidates([]);
+    setHasComputedSharedFollowing(false);
   };
 
   const getProfileImage = (node: GraphNode) => {
@@ -184,12 +261,16 @@ export default function App() {
     return num.toString();
   };
 
+  const isNodeInSharedSelection = (nodeId: string) => {
+    return selectedSharedSourceIds.includes(nodeId);
+  };
+
   return (
     <div className="w-full h-screen relative overflow-hidden bg-[#0B0C15] text-white font-sans">
       
       {/* 3D Graph Layer */}
       <Graph3D
-        data={filteredGraphData}
+        data={displayedGraphData}
         onNodeClick={handleNodeClick}
         onClearSelection={closeSelection}
         selectedNode={selectedNode}
@@ -231,46 +312,56 @@ export default function App() {
         <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 custom-scrollbar">
             {filteredNodes.map((node, idx) => {
                 const isSelected = selectedNode?.id === node.id;
+                const isSharedSelected = isNodeInSharedSelection(node.id);
                 return (
-                    <button
-                        key={node.id}
-                        ref={(el) => {
-                            if (el) itemRefs.current.set(node.id, el);
-                            else itemRefs.current.delete(node.id);
-                        }}
-                        onClick={() => handleNodeClick(node)}
-                        className={`w-full text-left p-3 rounded-xl mb-1 flex items-center gap-3 transition-all duration-200 border ${isSelected ? 'bg-indigo-600/20 border-indigo-500/50 shadow-lg shadow-indigo-900/20' : 'hover:bg-white/5 border-transparent'}`}
-                    >
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${isSelected ? 'bg-indigo-500 text-white' : 'bg-slate-800 text-slate-400'}`}>
-                           {nodeRankMap.get(node.id)}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                            <div className="flex items-baseline gap-1.5 truncate">
-                                <span className={`text-sm font-semibold ${isSelected ? 'text-white' : 'text-slate-200'}`}>
-                                    {node.name}
-                                </span>
-                                {node.handle && (
-                                    <span className="text-xs text-slate-500 font-mono truncate">
-                                        @{node.handle}
+                    <div key={node.id} className="mb-1 flex items-stretch gap-1">
+                        <button
+                            ref={(el) => {
+                                if (el) itemRefs.current.set(node.id, el);
+                                else itemRefs.current.delete(node.id);
+                            }}
+                            onClick={() => handleNodeClick(node)}
+                            className={`flex-1 text-left p-3 rounded-xl flex items-center gap-3 transition-all duration-200 border ${isSelected ? 'bg-indigo-600/20 border-indigo-500/50 shadow-lg shadow-indigo-900/20' : 'hover:bg-white/5 border-transparent'}`}
+                        >
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${isSelected ? 'bg-indigo-500 text-white' : 'bg-slate-800 text-slate-400'}`}>
+                               {nodeRankMap.get(node.id)}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                                <div className="flex items-baseline gap-1.5 truncate">
+                                    <span className={`text-sm font-semibold ${isSelected ? 'text-white' : 'text-slate-200'}`}>
+                                        {node.name}
                                     </span>
-                                )}
+                                    {node.handle && (
+                                        <span className="text-xs text-slate-500 font-mono truncate">
+                                            @{node.handle}
+                                        </span>
+                                    )}
+                                </div>
+                                <div className="flex items-center justify-between gap-2 mt-0.5">
+                                    <span className="text-xs text-slate-500 truncate flex-1">
+                                        {node.role
+                                          ? `${node.role}${node.associated && node.associated !== node.name ? ` @ ${node.associated}` : ''}`
+                                          : '\u00A0'}
+                                    </span>
+                                    <span className="text-[10px] text-slate-600 whitespace-nowrap shrink-0">
+                                        {node.followers
+                                          ? node.followers >= 1000000
+                                            ? `${(node.followers / 1000000).toFixed(1)}M`
+                                            : `${Math.round(node.followers / 1000)}K`
+                                          : `${node.val} conn.`}
+                                    </span>
+                                </div>
                             </div>
-                            <div className="flex items-center justify-between gap-2 mt-0.5">
-                                <span className="text-xs text-slate-500 truncate flex-1">
-                                    {node.role
-                                      ? `${node.role}${node.associated && node.associated !== node.name ? ` @ ${node.associated}` : ''}`
-                                      : '\u00A0'}
-                                </span>
-                                <span className="text-[10px] text-slate-600 whitespace-nowrap shrink-0">
-                                    {node.followers
-                                      ? node.followers >= 1000000
-                                        ? `${(node.followers / 1000000).toFixed(1)}M`
-                                        : `${Math.round(node.followers / 1000)}K`
-                                      : `${node.val} conn.`}
-                                </span>
-                            </div>
-                        </div>
-                    </button>
+                        </button>
+                        <button
+                            onClick={() => toggleSharedSource(node)}
+                            aria-label={isSharedSelected ? `Remove ${node.name} from shared following` : `Add ${node.name} to shared following`}
+                            className={`w-10 rounded-xl border transition-all duration-200 flex items-center justify-center ${isSharedSelected ? 'border-amber-400/60 bg-amber-400/15 text-amber-300' : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'}`}
+                            title={isSharedSelected ? 'Remove from shared following' : 'Add to shared following'}
+                        >
+                            {isSharedSelected ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                        </button>
+                    </div>
                 )
             })}
         </div>
@@ -500,11 +591,199 @@ export default function App() {
                                 )}
                             </div>
                         )}
+
+                        {selectedNode.isExternalCandidate && (
+                            <div className="mt-4 space-y-3">
+                                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-400/10 border border-amber-400/20 text-amber-200 text-xs font-medium">
+                                    <Sparkles className="w-3.5 h-3.5" />
+                                    Shared-following candidate
+                                </div>
+                                <div className="text-xs text-slate-400 leading-relaxed">
+                                    Followed by{' '}
+                                    <span className="text-white font-medium">{selectedNode.sharedFollowerCount || 0}</span>
+                                    {' '}selected core accounts:
+                                    {' '}
+                                    <span className="text-slate-200">
+                                      {(selectedNode.followedBySelectedIds || [])
+                                        .map((nodeId) => coreNodeById.get(nodeId)?.handle || coreNodeById.get(nodeId)?.name || nodeId)
+                                        .join(', ')}
+                                    </span>
+                                </div>
+                            </div>
+                        )}
+
+                        {!selectedNode.isExternalCandidate && (
+                            <div className="mt-4 flex items-center gap-2">
+                                <button
+                                    onClick={() => toggleSharedSource(selectedNode)}
+                                    className={`inline-flex items-center gap-2 px-4 py-2 rounded-full border text-sm font-medium transition-all ${isNodeInSharedSelection(selectedNode.id) ? 'border-amber-400/50 bg-amber-400/15 text-amber-200' : 'border-white/10 bg-white/5 text-slate-200 hover:bg-white/10'}`}
+                                >
+                                    {isNodeInSharedSelection(selectedNode.id) ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                                    {isNodeInSharedSelection(selectedNode.id) ? 'Added to shared following' : 'Add to shared following'}
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
                 </>
             )}
 
+        </div>
+      )}
+
+      {selectedSharedSourceIds.length > 0 && (
+        <div className={`absolute z-30 pointer-events-auto ${isMobile ? 'bottom-24 left-4 right-4' : 'bottom-28 right-6 w-[360px] max-w-[calc(100vw-48px)]'}`}>
+          <div className="bg-[#090A10]/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-white/10 bg-white/[0.02]">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2 text-white font-semibold">
+                    <Users className="w-4 h-4 text-amber-300" />
+                    Shared Following
+                  </div>
+                  <div className="text-xs text-slate-400 mt-1">
+                    {sharedSelectedNodes.map((node) => node.handle || node.name).join(', ')}
+                  </div>
+                </div>
+                <div className="text-xs text-slate-400 whitespace-nowrap">
+                  {selectedSharedSourceIds.length} selected
+                </div>
+              </div>
+            </div>
+
+            <div className="px-4 py-3 space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <label className="text-xs text-slate-400">
+                  Mode
+                  <select
+                    value={sharedFollowingMode}
+                    onChange={(e) => setSharedFollowingMode(e.target.value as SharedFollowingMode)}
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-white focus:outline-none"
+                  >
+                    <option value="threshold">Threshold</option>
+                    <option value="strict">Strict</option>
+                  </select>
+                </label>
+                <label className="text-xs text-slate-400">
+                  Expand
+                  <select
+                    value={candidateLimit}
+                    onChange={(e) => setCandidateLimit(Number(e.target.value))}
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-white focus:outline-none"
+                  >
+                    <option value={10}>Top 10</option>
+                    <option value={20}>Top 20</option>
+                    <option value={50}>Top 50</option>
+                  </select>
+                </label>
+              </div>
+
+              {sharedFollowingMode === 'threshold' && (
+                <label className="block text-xs text-slate-400">
+                  Minimum shared follows
+                  <select
+                    value={Math.min(minSharedCount, Math.max(1, selectedSharedSourceIds.length))}
+                    onChange={(e) => setMinSharedCount(Number(e.target.value))}
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-white focus:outline-none"
+                  >
+                    {Array.from({ length: selectedSharedSourceIds.length }, (_, index) => index + 1).map((count) => (
+                      <option key={count} value={count}>
+                        At least {count}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={handleFindSharedFollowing}
+                  disabled={!hasSharedFollowingDataset}
+                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold transition-colors ${hasSharedFollowingDataset ? 'bg-amber-300 text-black hover:bg-amber-200' : 'bg-amber-300/40 text-slate-900/70 cursor-not-allowed'}`}
+                >
+                  <Sparkles className="w-4 h-4" />
+                  Find Shared Following
+                </button>
+                <button
+                  onClick={handleClearSharedSelection}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-white/10 bg-white/5 text-slate-200 text-sm hover:bg-white/10 transition-colors"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  Clear Selection
+                </button>
+                {expandedCandidates.length > 0 && (
+                  <button
+                    onClick={handleCollapseCandidates}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-white/10 bg-white/5 text-slate-200 text-sm hover:bg-white/10 transition-colors"
+                  >
+                    <Layers className="w-4 h-4" />
+                    Collapse Candidates
+                  </button>
+                )}
+              </div>
+
+              {!hasSharedFollowingDataset && (
+                <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-slate-300">
+                  Shared-following dataset is not loaded yet. Run <span className="font-mono text-amber-200">npm run generate-shared-following</span> with <span className="font-mono text-amber-200">XAPI_API_KEY</span> to populate outside-candidate data.
+                </div>
+              )}
+
+              {hasSharedFollowingDataset && hasComputedSharedFollowing && computedSharedCandidates.length === 0 && (
+                <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-slate-300">
+                  No shared-following candidates matched the current rules. Try lowering the minimum shared count or turning off strict mode.
+                </div>
+              )}
+
+              {hasSharedFollowingDataset && hasComputedSharedFollowing && computedSharedCandidates.length > 0 && (
+                <div className="rounded-xl border border-white/10 bg-white/[0.03]">
+                  <div className="px-3 py-2 border-b border-white/10 flex items-center justify-between gap-3">
+                    <div className="text-sm text-white font-medium">
+                      Candidate Results
+                    </div>
+                    <div className="text-xs text-slate-400">
+                      Showing {expandedCandidates.length} of {computedSharedCandidates.length}
+                    </div>
+                  </div>
+                  <div className="max-h-72 overflow-y-auto custom-scrollbar">
+                    {computedSharedCandidates.slice(0, candidateLimit).map((candidate) => (
+                      <button
+                        key={candidate.id}
+                        onClick={() => handleNodeClick(candidate)}
+                        className={`w-full text-left px-3 py-3 border-b border-white/5 last:border-b-0 hover:bg-white/[0.04] transition-colors ${selectedNode?.id === candidate.id ? 'bg-amber-300/10' : ''}`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-white truncate">
+                              {candidate.name}
+                            </div>
+                            <div className="text-xs text-amber-200 font-mono truncate">
+                              @{candidate.handle}
+                            </div>
+                          </div>
+                          <div className="text-[11px] text-slate-400 whitespace-nowrap">
+                            {formatNumber(candidate.followers)}
+                          </div>
+                        </div>
+                        <div className="mt-1 text-xs text-slate-400 line-clamp-2">
+                          {candidate.bio || candidate.role || 'No bio available'}
+                        </div>
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+                          <span className="px-2 py-1 rounded-full bg-amber-300/10 text-amber-200 border border-amber-300/15">
+                            {candidate.sharedFollowerCount} shared follows
+                          </span>
+                          {candidate.isLikelyCommercialKOL && (
+                            <span className="px-2 py-1 rounded-full bg-emerald-400/10 text-emerald-200 border border-emerald-400/15">
+                              KOL leaning
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -541,6 +820,12 @@ export default function App() {
             >
               Clear filter
             </button>
+          )}
+          {expandedCandidates.length > 0 && (
+            <div className="flex items-center gap-2 px-2 py-1 rounded-md bg-amber-300/5 border border-amber-300/10">
+              <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: '#F6D365', boxShadow: '0 0 8px #F6D365' }} />
+              <span className="text-xs text-amber-100">Shared-following candidates</span>
+            </div>
           )}
           <div className="border-t border-white/10 my-2" />
           <button
@@ -594,6 +879,13 @@ export default function App() {
                 <h3 className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-1">Graph & Connections</h3>
                 <p className="text-xs text-slate-300 leading-relaxed">
                   The default view shows all connections. <span className="text-white font-medium">Click a node</span> to see who they follow. Node sizes reflect followers. Filter by category using the legend.
+                </p>
+              </div>
+
+              <div>
+                <h3 className="text-xs font-semibold text-indigo-400 uppercase tracking-wider mb-1">Shared Following Discovery</h3>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Add one or more Top300 nodes to the <span className="text-white font-medium">shared following</span> pool, then run the finder to surface outside accounts commonly followed by those selected insiders. Gold nodes are temporary discovery candidates, not permanent Top300 entries.
                 </p>
               </div>
 

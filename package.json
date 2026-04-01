@@ -6,8 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:railway": "node scripts/prepareSharedFollowingData.js && vite build",
     "preview": "vite preview",
+    "start": "node server.js",
     "fetch-influencers": "node scripts/fetchInfluencers.js",
+    "generate-shared-following": "node scripts/generateSharedFollowingData.js",
     "test": "node --test"
   },
   "dependencies": {

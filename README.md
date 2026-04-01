@@ -43,3 +43,5 @@ There are millions of pieces of AI news and information generated every second o
 1. Install dependencies: `npm install`
 2. Run the app: `npm run dev`
 3. For crawler/data scripts, set `XAPI_API_KEY` in your Railway environment or local `.env`
+4. To generate the shared-following candidate pool for multi-select discovery, run `npm run generate-shared-following`
+5. For Railway deployment notes, see [docs/railway-deploy.md](/E:/vibe/AI_Influencers_X/docs/railway-deploy.md)

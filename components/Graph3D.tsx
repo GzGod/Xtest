@@ -140,6 +140,11 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onClearSelection, 
        const sId = typeof link.source === 'object' ? link.source.id : link.source;
        const tId = typeof link.target === 'object' ? link.target.id : link.target;
 
+       if (selectedNode.isExternalCandidate) {
+         if (tId === selectedNode.id) ids.add(String(sId));
+         return;
+       }
+
        // Only highlight nodes that the selected node follows
        if (sId === selectedNode.id) ids.add(String(tId));
     });
@@ -208,7 +213,7 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onClearSelection, 
 
   // Node color based on category and selection state
   const getNodeColor = useCallback((node: any) => {
-    const baseColor = getCategoryColor(node.group || 'company');
+    const baseColor = node.isExternalCandidate ? '#F6D365' : getCategoryColor(node.group || 'company');
 
     if (selectedNode) {
       if (node.id === selectedNode.id) {
@@ -226,6 +231,12 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onClearSelection, 
   // Node size based on follower count
   const getNodeSize = useCallback((node: any) => {
     const followers = node.followers || 0;
+    if (node.isExternalCandidate) {
+      if (followers >= 250000) return 4.5;
+      if (followers >= 50000) return 4;
+      if (followers >= 10000) return 3.5;
+      return 3.2;
+    }
     if (followers >= 1000000) return 8;   // 1M+
     if (followers >= 500000) return 6.5;  // 500K+
     if (followers >= 100000) return 5;    // 100K+
@@ -239,7 +250,7 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onClearSelection, 
     const group = new THREE.Group();
 
     const nodeSize = getNodeSize(node);
-    const baseColor = getCategoryColor(node.group || 'company');
+    const baseColor = node.isExternalCandidate ? '#F6D365' : getCategoryColor(node.group || 'company');
 
     // Create glow using many layered transparent spheres
     const glowMaterials: THREE.MeshBasicMaterial[] = [];
@@ -281,7 +292,7 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onClearSelection, 
     const labelDiv = document.createElement('div');
     labelDiv.className = 'node-label';
     labelDiv.textContent = node.name || node.id;
-    labelDiv.style.color = 'white';
+    labelDiv.style.color = node.isExternalCandidate ? '#FDE68A' : 'white';
     labelDiv.style.fontSize = '9px';
     labelDiv.style.fontFamily = 'Arial, sans-serif';
     labelDiv.style.fontWeight = 'bold';
@@ -363,7 +374,7 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onClearSelection, 
       const node = processedData.nodes.find(n => n.id === nodeId);
       if (!node) return;
 
-      const baseColor = getCategoryColor(node.group || 'company');
+      const baseColor = node.isExternalCandidate ? '#F6D365' : getCategoryColor(node.group || 'company');
       const materialsArray = Array.isArray(materials) ? materials : [materials];
       const isHighlighted = !selectedNode || nodeId === selectedNode.id || neighborIds.has(nodeId);
 
@@ -382,6 +393,11 @@ const Graph3D: React.FC<Graph3DProps> = ({ data, onNodeClick, onClearSelection, 
     if (!selectedNode) return true;
 
     const sId = typeof link.source === 'object' ? link.source.id : link.source;
+    const tId = typeof link.target === 'object' ? link.target.id : link.target;
+
+    if (selectedNode.isExternalCandidate) {
+      return tId === selectedNode.id;
+    }
 
     return sId === selectedNode.id;
   }, [selectedNode]);
