@@ -1,10 +1,9 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import Graph3D from './components/Graph3D';
 import { INITIAL_DATA, LAST_UPDATED } from './constants';
-import { SHARED_FOLLOWING_DATA } from './sharedFollowingData';
 import { DEFAULT_LOCALE, ENGLISH_LOCALE, LOCALE_STORAGE_KEY, createTranslator, resolveInitialLocale } from './services/i18n.js';
 import { getSharedToggleAppearance, getSidebarRowAppearance, getSidebarToggleButtonClasses } from './services/sidebarAppearance.js';
-import { computeSharedCandidates, mergeSharedCandidatesIntoGraph } from './services/sharedFollowing.js';
+import { computeSharedCandidates, getSharedFollowingCoverage, mergeSharedCandidatesIntoGraph } from './services/sharedFollowing.js';
 import { GraphData, GraphNode, SharedFollowingCandidateNode, SharedFollowingMode } from './types';
 import { X as XIcon, Building2, Link2, ChevronLeft, ChevronRight, Calendar, BadgeCheck, MapPin, Search, HelpCircle, Sparkles, Users, RotateCcw, Plus, Check, Layers } from 'lucide-react';
 
@@ -27,8 +26,43 @@ const createCreatorProfile = (t: ReturnType<typeof createTranslator>): GraphNode
   verified: 'blue',
 });
 
+type SharedFollowingCoverageState = {
+  coveredHandles: string[];
+  missingHandles: string[];
+  datasetCount: number | null;
+};
+
+type SharedFollowingQueryState = {
+  source: 'idle' | 'database' | 'static';
+  candidates: SharedFollowingCandidateNode[];
+  coverage: SharedFollowingCoverageState;
+  refreshedHandles: string[];
+  refreshErrors: Array<{ handle: string; message: string }>;
+};
+
+type ApiError = Error & {
+  code?: string;
+};
+
+const EMPTY_SHARED_FOLLOWING_STATE: SharedFollowingQueryState = {
+  source: 'idle',
+  candidates: [],
+  coverage: {
+    coveredHandles: [],
+    missingHandles: [],
+    datasetCount: null,
+  },
+  refreshedHandles: [],
+  refreshErrors: [],
+};
+
+function normalizeHandle(value: string | undefined) {
+  return String(value || '').trim().toLowerCase();
+}
+
 export default function App() {
-  const [data] = useState<GraphData>(INITIAL_DATA);
+  const [data, setData] = useState<GraphData>(INITIAL_DATA);
+  const [lastUpdatedLabel, setLastUpdatedLabel] = useState(LAST_UPDATED);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 768);
   const [isLegendOpen, setIsLegendOpen] = useState(true);
@@ -47,6 +81,9 @@ export default function App() {
   const [candidateLimit, setCandidateLimit] = useState(20);
   const [expandedCandidates, setExpandedCandidates] = useState<SharedFollowingCandidateNode[]>([]);
   const [hasComputedSharedFollowing, setHasComputedSharedFollowing] = useState(false);
+  const [isSharedFollowingLoading, setIsSharedFollowingLoading] = useState(false);
+  const [sharedFollowingState, setSharedFollowingState] = useState<SharedFollowingQueryState>(EMPTY_SHARED_FOLLOWING_STATE);
+  const [sharedFollowingError, setSharedFollowingError] = useState<string | null>(null);
 
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
@@ -83,6 +120,42 @@ export default function App() {
     window.localStorage.setItem(LOCALE_STORAGE_KEY, locale);
     document.documentElement.lang = locale;
   }, [locale]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    async function loadTop300Data() {
+      try {
+        const response = await fetch('/api/top300');
+
+        if (!response.ok) {
+          throw new Error(`Failed to load Top300 data: HTTP ${response.status}`);
+        }
+
+        const payload = await response.json();
+
+        if (!isActive) {
+          return;
+        }
+
+        if (payload?.graphData?.nodes && payload?.graphData?.links) {
+          setData(payload.graphData as GraphData);
+        }
+
+        if (payload?.lastUpdated) {
+          setLastUpdatedLabel(String(payload.lastUpdated));
+        }
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    void loadTop300Data();
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
 
   // 1. Calculate Statistics & Sort Nodes by Followers (or connections as fallback)
   const sortedNodes = useMemo(() => {
@@ -123,19 +196,18 @@ export default function App() {
       .filter((node): node is GraphNode => Boolean(node));
   }, [selectedSharedSourceIds, coreNodeById]);
 
-  const computedSharedCandidates = useMemo<SharedFollowingCandidateNode[]>(() => {
-    return computeSharedCandidates({
-      selectedSourceIds: selectedSharedSourceIds,
-      externalFollowingBySource: SHARED_FOLLOWING_DATA.externalFollowingBySource,
-      candidateNodesById: SHARED_FOLLOWING_DATA.candidateNodesById,
-      mode: sharedFollowingMode,
-      minSharedCount,
-    }) as SharedFollowingCandidateNode[];
-  }, [selectedSharedSourceIds, sharedFollowingMode, minSharedCount]);
+  const selectedSharedHandles = useMemo(() => {
+    return sharedSelectedNodes
+      .map((node) => normalizeHandle(node.handle || node.id))
+      .filter(Boolean);
+  }, [sharedSelectedNodes]);
 
-  const hasSharedFollowingDataset = useMemo(() => {
-    return Object.keys(SHARED_FOLLOWING_DATA.externalFollowingBySource || {}).length > 0;
-  }, []);
+  const missingSharedSourceLabels = useMemo(() => {
+    return sharedFollowingState.coverage.missingHandles.map((nodeId) => {
+      const node = coreNodeById.get(nodeId);
+      return node?.handle || node?.name || nodeId;
+    });
+  }, [sharedFollowingState.coverage.missingHandles, coreNodeById]);
 
   // Filter nodes based on search query and selected category
   const filteredNodes = useMemo(() => {
@@ -207,7 +279,34 @@ export default function App() {
   useEffect(() => {
     setExpandedCandidates([]);
     setHasComputedSharedFollowing(false);
+    setSharedFollowingState(EMPTY_SHARED_FOLLOWING_STATE);
+    setSharedFollowingError(null);
   }, [selectedSharedSourceIds, sharedFollowingMode, minSharedCount]);
+
+  useEffect(() => {
+    if (!hasComputedSharedFollowing) {
+      return;
+    }
+
+    setExpandedCandidates(sharedFollowingState.candidates.slice(0, candidateLimit));
+  }, [candidateLimit, hasComputedSharedFollowing, sharedFollowingState.candidates]);
+
+  useEffect(() => {
+    if (!selectedNode || selectedNode.isExternalCandidate) {
+      return;
+    }
+
+    const nextNode = data.nodes.find((node) => node.id === selectedNode.id);
+
+    if (!nextNode) {
+      setSelectedNode(null);
+      return;
+    }
+
+    if (nextNode !== selectedNode) {
+      setSelectedNode(nextNode);
+    }
+  }, [data.nodes, selectedNode]);
 
   const nodeCount = data?.nodes?.length || 0;
   const linkCount = data?.links?.length || 0;
@@ -237,15 +336,106 @@ export default function App() {
     );
   };
 
-  const handleFindSharedFollowing = () => {
+  const applyStaticSharedFollowingFallback = async () => {
+    const { SHARED_FOLLOWING_DATA } = await import('./sharedFollowingData');
+    const fallbackCoverage = getSharedFollowingCoverage({
+      selectedSourceIds: selectedSharedSourceIds,
+      externalFollowingBySource: SHARED_FOLLOWING_DATA.externalFollowingBySource,
+    });
+    const fallbackCandidates = computeSharedCandidates({
+      selectedSourceIds: selectedSharedSourceIds,
+      externalFollowingBySource: SHARED_FOLLOWING_DATA.externalFollowingBySource,
+      candidateNodesById: SHARED_FOLLOWING_DATA.candidateNodesById,
+      mode: sharedFollowingMode,
+      minSharedCount,
+    }) as SharedFollowingCandidateNode[];
+    const nextState: SharedFollowingQueryState = {
+      source: 'static',
+      candidates: fallbackCandidates,
+      coverage: {
+        coveredHandles: fallbackCoverage.coveredSourceIds,
+        missingHandles: fallbackCoverage.missingSourceIds,
+        datasetCount: Object.keys(SHARED_FOLLOWING_DATA.externalFollowingBySource || {}).length,
+      },
+      refreshedHandles: [],
+      refreshErrors: [],
+    };
+
+    setSharedFollowingState(nextState);
     setHasComputedSharedFollowing(true);
-    setExpandedCandidates(computedSharedCandidates.slice(0, candidateLimit));
+    setExpandedCandidates(fallbackCandidates.slice(0, candidateLimit));
+  };
+
+  const handleFindSharedFollowing = async () => {
+    if (selectedSharedHandles.length === 0) {
+      return;
+    }
+
+    setIsSharedFollowingLoading(true);
+    setSharedFollowingError(null);
+
+    try {
+      const response = await fetch('/api/shared-following/query', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          selectedHandles: selectedSharedHandles,
+          mode: sharedFollowingMode,
+          minSharedCount,
+          limit: 50,
+        }),
+      });
+      const payload = await response.json().catch(() => null);
+
+      if (!payload) {
+        throw new TypeError('Shared-following API did not return JSON');
+      }
+
+      if (!response.ok) {
+        const apiError = new Error(payload?.error?.message || `HTTP ${response.status}`) as ApiError;
+        apiError.code = payload?.error?.code;
+        throw apiError;
+      }
+
+      const nextState: SharedFollowingQueryState = {
+        source: 'database',
+        candidates: Array.isArray(payload?.candidates) ? payload.candidates : [],
+        coverage: {
+          coveredHandles: Array.isArray(payload?.coverage?.coveredHandles) ? payload.coverage.coveredHandles : [],
+          missingHandles: Array.isArray(payload?.coverage?.missingHandles) ? payload.coverage.missingHandles : [],
+          datasetCount: null,
+        },
+        refreshedHandles: Array.isArray(payload?.refreshedHandles) ? payload.refreshedHandles : [],
+        refreshErrors: Array.isArray(payload?.refreshErrors) ? payload.refreshErrors : [],
+      };
+
+      setSharedFollowingState(nextState);
+      setHasComputedSharedFollowing(true);
+      setExpandedCandidates(nextState.candidates.slice(0, candidateLimit));
+    } catch (error) {
+      const apiError = error as ApiError;
+
+      if (apiError.code === 'database_not_configured' || apiError instanceof TypeError) {
+        await applyStaticSharedFollowingFallback();
+      } else {
+        setSharedFollowingState(EMPTY_SHARED_FOLLOWING_STATE);
+        setExpandedCandidates([]);
+        setHasComputedSharedFollowing(true);
+        setSharedFollowingError(apiError.message || t('shared.queryFailed'));
+      }
+    } finally {
+      setIsSharedFollowingLoading(false);
+    }
   };
 
   const handleClearSharedSelection = () => {
     setSelectedSharedSourceIds([]);
     setExpandedCandidates([]);
     setHasComputedSharedFollowing(false);
+    setSharedFollowingState(EMPTY_SHARED_FOLLOWING_STATE);
+    setSharedFollowingError(null);
   };
 
   const handleCollapseCandidates = () => {
@@ -264,6 +454,8 @@ export default function App() {
     setSelectedSharedSourceIds([]);
     setExpandedCandidates([]);
     setHasComputedSharedFollowing(false);
+    setSharedFollowingState(EMPTY_SHARED_FOLLOWING_STATE);
+    setSharedFollowingError(null);
   };
 
   const getProfileImage = (node: GraphNode) => {
@@ -291,6 +483,20 @@ export default function App() {
     return selectedSharedSourceIds.includes(nodeId);
   };
 
+  const hasSharedFollowingDataset = sharedFollowingState.source === 'database'
+    ? true
+    : sharedFollowingState.source === 'static'
+      ? (sharedFollowingState.coverage.datasetCount || 0) > 0
+      : false;
+  const hasCoveredSharedSources = sharedFollowingState.coverage.coveredHandles.length > 0;
+  const hasMissingSharedSources = missingSharedSourceLabels.length > 0;
+  const sharedCoverageCount = hasComputedSharedFollowing
+    ? sharedFollowingState.coverage.coveredHandles.length
+    : selectedSharedSourceIds.length;
+  const sharedThresholdOptionCount = Math.max(
+    sharedCoverageCount,
+    1,
+  );
   const creatorRowAppearance = getSidebarRowAppearance(showCreatorCard);
   const sidebarToggleButtonClasses = getSidebarToggleButtonClasses(isMobile, isSidebarOpen);
 
@@ -347,7 +553,7 @@ export default function App() {
                 {t('app.title')}
               </h1>
               <div className="mt-4 inline-flex items-center rounded-full border border-white/[0.08] bg-white/[0.05] px-3 py-1.5 text-[11px] text-slate-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
-                {t('app.updatedAt', { date: LAST_UPDATED })}
+                {t('app.updatedAt', { date: lastUpdatedLabel })}
               </div>
             </div>
           </div>
@@ -721,6 +927,14 @@ export default function App() {
                   {t('shared.selectedCount', { count: selectedSharedSourceIds.length })}
                 </div>
               </div>
+              {hasComputedSharedFollowing && hasMissingSharedSources && (
+                <div className="mt-2 text-[11px] text-amber-200/80">
+                  {t('shared.coverageSummary', {
+                    covered: sharedFollowingState.coverage.coveredHandles.length,
+                    total: selectedSharedSourceIds.length,
+                  })}
+                </div>
+              )}
             </div>
 
             <div className="px-4 py-3 space-y-3">
@@ -754,11 +968,11 @@ export default function App() {
                 <label className="block text-xs text-slate-400">
                   {t('shared.minSharedCount')}
                   <select
-                    value={Math.min(minSharedCount, Math.max(1, selectedSharedSourceIds.length))}
+                    value={Math.min(minSharedCount, sharedThresholdOptionCount)}
                     onChange={(e) => setMinSharedCount(Number(e.target.value))}
                     className="mt-1 w-full rounded-lg border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-white focus:outline-none"
                   >
-                    {Array.from({ length: selectedSharedSourceIds.length }, (_, index) => index + 1).map((count) => (
+                    {Array.from({ length: sharedThresholdOptionCount }, (_, index) => index + 1).map((count) => (
                       <option key={count} value={count}>
                         {t('shared.atLeastCount', { count })}
                       </option>
@@ -770,11 +984,11 @@ export default function App() {
               <div className="flex flex-wrap gap-2">
                 <button
                   onClick={handleFindSharedFollowing}
-                  disabled={!hasSharedFollowingDataset}
-                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold transition-colors ${hasSharedFollowingDataset ? 'bg-amber-300 text-black hover:bg-amber-200' : 'bg-amber-300/40 text-slate-900/70 cursor-not-allowed'}`}
+                  disabled={isSharedFollowingLoading}
+                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold transition-colors ${isSharedFollowingLoading ? 'bg-amber-300/40 text-slate-900/70 cursor-wait' : 'bg-amber-300 text-black hover:bg-amber-200'}`}
                 >
                   <Sparkles className="w-4 h-4" />
-                  {t('shared.find')}
+                  {isSharedFollowingLoading ? t('shared.finding') : t('shared.find')}
                 </button>
                 <button
                   onClick={handleClearSharedSelection}
@@ -794,7 +1008,13 @@ export default function App() {
                 )}
               </div>
 
-              {!hasSharedFollowingDataset && (
+              {sharedFollowingError && (
+                <div className="rounded-xl border border-rose-300/20 bg-rose-300/[0.06] px-3 py-3 text-sm text-rose-100">
+                  {sharedFollowingError}
+                </div>
+              )}
+
+              {hasComputedSharedFollowing && sharedFollowingState.source === 'static' && !hasSharedFollowingDataset && (
                 <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-slate-300">
                   {t('shared.datasetMissing', {
                     command: 'npm run generate-shared-following',
@@ -803,13 +1023,58 @@ export default function App() {
                 </div>
               )}
 
-              {hasSharedFollowingDataset && hasComputedSharedFollowing && computedSharedCandidates.length === 0 && (
+              {hasComputedSharedFollowing && hasSharedFollowingDataset && hasMissingSharedSources && !hasCoveredSharedSources && (
+                <div className="rounded-xl border border-amber-300/20 bg-amber-300/[0.06] px-3 py-3 text-sm text-amber-100">
+                  {sharedFollowingState.source === 'database'
+                    ? t('shared.noCoverageDatabase', {
+                        accounts: missingSharedSourceLabels.join(', '),
+                      })
+                    : t('shared.noCoverage', {
+                        datasetCount: sharedFollowingState.coverage.datasetCount || 0,
+                        accounts: missingSharedSourceLabels.join(', '),
+                      })}
+                </div>
+              )}
+
+              {hasComputedSharedFollowing && hasSharedFollowingDataset && hasMissingSharedSources && hasCoveredSharedSources && (
+                <div className="rounded-xl border border-amber-300/20 bg-amber-300/[0.06] px-3 py-3 text-sm text-amber-100">
+                  {sharedFollowingState.source === 'database'
+                    ? t('shared.partialCoverageDatabase', {
+                        covered: sharedFollowingState.coverage.coveredHandles.length,
+                        total: selectedSharedSourceIds.length,
+                        accounts: missingSharedSourceLabels.join(', '),
+                      })
+                    : t('shared.partialCoverage', {
+                        covered: sharedFollowingState.coverage.coveredHandles.length,
+                        total: selectedSharedSourceIds.length,
+                        accounts: missingSharedSourceLabels.join(', '),
+                      })}
+                </div>
+              )}
+
+              {hasComputedSharedFollowing && sharedFollowingState.refreshErrors.length > 0 && (
+                <div className="rounded-xl border border-amber-300/20 bg-amber-300/[0.06] px-3 py-3 text-sm text-amber-100">
+                  {t('shared.refreshFallback', {
+                    accounts: sharedFollowingState.refreshErrors.map((item) => item.handle).join(', '),
+                  })}
+                </div>
+              )}
+
+              {hasComputedSharedFollowing && sharedFollowingState.refreshedHandles.length > 0 && (
+                <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/[0.06] px-3 py-3 text-sm text-emerald-100">
+                  {t('shared.refreshed', {
+                    accounts: sharedFollowingState.refreshedHandles.join(', '),
+                  })}
+                </div>
+              )}
+
+              {hasSharedFollowingDataset && hasCoveredSharedSources && hasComputedSharedFollowing && sharedFollowingState.candidates.length === 0 && (
                 <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-slate-300">
                   {t('shared.empty')}
                 </div>
               )}
 
-              {hasSharedFollowingDataset && hasComputedSharedFollowing && computedSharedCandidates.length > 0 && (
+              {hasSharedFollowingDataset && hasCoveredSharedSources && hasComputedSharedFollowing && sharedFollowingState.candidates.length > 0 && (
                 <div className="rounded-xl border border-white/10 bg-white/[0.03]">
                   <div className="px-3 py-2 border-b border-white/10 flex items-center justify-between gap-3">
                     <div className="text-sm text-white font-medium">
@@ -818,12 +1083,12 @@ export default function App() {
                     <div className="text-xs text-slate-400">
                       {t('shared.resultsShowing', {
                         shown: expandedCandidates.length,
-                        total: computedSharedCandidates.length,
+                        total: sharedFollowingState.candidates.length,
                       })}
                     </div>
                   </div>
                   <div className="max-h-72 overflow-y-auto custom-scrollbar">
-                    {computedSharedCandidates.slice(0, candidateLimit).map((candidate) => (
+                    {sharedFollowingState.candidates.slice(0, candidateLimit).map((candidate) => (
                       <button
                         key={candidate.id}
                         onClick={() => handleNodeClick(candidate)}

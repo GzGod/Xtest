@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   computeSharedCandidates,
+  getSharedFollowingCoverage,
   mergeSharedCandidatesIntoGraph,
 } from '../../services/sharedFollowing.js';
 
@@ -74,6 +75,33 @@ test('threshold mode returns candidates followed by at least the configured mini
   assert.deepEqual(result.map((item) => item.id), ['c1', 'c3']);
   assert.equal(result[0].sharedFollowerCount, 3);
   assert.equal(result[1].sharedFollowerCount, 2);
+});
+
+test('coverage helper distinguishes covered and missing selected sources', () => {
+  const coverage = getSharedFollowingCoverage({
+    selectedSourceIds: ['a', 'b', 'c'],
+    externalFollowingBySource: {
+      a: ['c1'],
+      c: [],
+    },
+  });
+
+  assert.deepEqual(coverage.coveredSourceIds, ['a', 'c']);
+  assert.deepEqual(coverage.missingSourceIds, ['b']);
+});
+
+test('candidate computation uses covered selected sources when the dataset is partial', () => {
+  const result = computeSharedCandidates({
+    selectedSourceIds: ['a', 'missing-source'],
+    externalFollowingBySource: {
+      a: ['c1'],
+    },
+    candidateNodesById,
+    mode: 'strict',
+  });
+
+  assert.deepEqual(result.map((item) => item.id), ['c1']);
+  assert.equal(result[0].sharedFollowerCount, 1);
 });
 
 test('candidate ranking prefers stronger commercial candidates over weak institutional matches', () => {

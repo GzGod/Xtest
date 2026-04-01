@@ -50,6 +50,29 @@ function getRequiredSharedCount({ selectedCount, mode, minSharedCount }) {
   return Math.min(selectedCount, clampPositiveInt(minSharedCount, DEFAULT_MIN_SHARED_COUNT));
 }
 
+export function getSharedFollowingCoverage({
+  selectedSourceIds,
+  externalFollowingBySource,
+}) {
+  const normalizedSelectedIds = Array.from(new Set((selectedSourceIds || []).filter(Boolean)));
+  const coveredSourceIds = [];
+  const missingSourceIds = [];
+
+  for (const sourceId of normalizedSelectedIds) {
+    if (Object.prototype.hasOwnProperty.call(externalFollowingBySource || {}, sourceId)) {
+      coveredSourceIds.push(sourceId);
+    } else {
+      missingSourceIds.push(sourceId);
+    }
+  }
+
+  return {
+    selectedSourceIds: normalizedSelectedIds,
+    coveredSourceIds,
+    missingSourceIds,
+  };
+}
+
 export function computeSharedCandidates({
   selectedSourceIds,
   externalFollowingBySource,
@@ -57,7 +80,10 @@ export function computeSharedCandidates({
   mode = DEFAULT_MODE,
   minSharedCount = DEFAULT_MIN_SHARED_COUNT,
 }) {
-  const normalizedSelectedIds = Array.from(new Set((selectedSourceIds || []).filter(Boolean)));
+  const { coveredSourceIds: normalizedSelectedIds } = getSharedFollowingCoverage({
+    selectedSourceIds,
+    externalFollowingBySource,
+  });
 
   if (normalizedSelectedIds.length === 0) {
     return [];

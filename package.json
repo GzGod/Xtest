@@ -11,6 +11,7 @@
     "start": "node server.js",
     "fetch-influencers": "node scripts/fetchInfluencers.js",
     "generate-shared-following": "node scripts/generateSharedFollowingData.js",
+    "sync-top300:db": "node scripts/syncTop300ToDatabase.js",
     "test": "node --test"
   },
   "dependencies": {
@@ -18,6 +19,7 @@
     "@vercel/analytics": "^1.6.1",
     "dotenv": "^17.2.4",
     "lucide-react": "0.263.1",
+    "pg": "^8.20.0",
     "react": "18.2.0",
     "react-dom": "18.2.0",
     "react-force-graph-3d": "1.29.0",
