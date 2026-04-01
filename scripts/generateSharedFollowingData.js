@@ -178,6 +178,7 @@ export async function generateSharedFollowingData(options = {}) {
   const apiKey = options.apiKey ?? process.env.XAPI_API_KEY;
   const pageSize = options.pageSize ?? process.env.XAPI_FOLLOWING_PAGE_SIZE;
   const maxPages = options.maxPages ?? process.env.XAPI_MAX_FOLLOWING_PAGES;
+  const sourceLimit = options.sourceLimit ?? process.env.SHARED_FOLLOWING_SOURCE_LIMIT;
   const constantsPath = options.constantsPath ?? path.join(__dirname, '..', 'constants.ts');
   const outputPath = options.outputPath ?? path.join(__dirname, '..', 'sharedFollowingData.ts');
 
@@ -185,12 +186,16 @@ export async function generateSharedFollowingData(options = {}) {
     throw new Error('Missing XAPI_API_KEY in environment');
   }
 
+  const limit = sourceLimit ? Number.parseInt(String(sourceLimit), 10) : null;
   const topNodes = readTopNodesFromConstants(constantsPath);
+  const selectedTopNodes = Number.isFinite(limit) && limit > 0
+    ? topNodes.slice(0, limit)
+    : topNodes;
   const followingsBySource = {};
 
-  console.log(`Generating shared-following candidate pool from ${topNodes.length} core nodes...`);
+  console.log(`Generating shared-following candidate pool from ${selectedTopNodes.length} core nodes...`);
 
-  for (const node of topNodes) {
+  for (const node of selectedTopNodes) {
     const sourceId = normalizeId(node.id);
     console.log(`Fetching external followings for @${node.handle || node.id}...`);
     followingsBySource[sourceId] = await getFollowingUsersByScreenName(node.handle || node.id, {
@@ -200,7 +205,7 @@ export async function generateSharedFollowingData(options = {}) {
     });
   }
 
-  const dataset = buildSharedFollowingDataset({ topNodes, followingsBySource });
+  const dataset = buildSharedFollowingDataset({ topNodes: selectedTopNodes, followingsBySource });
   writeSharedFollowingData(outputPath, dataset);
   console.log(`Wrote shared-following data to ${outputPath}`);
 

@@ -7,6 +7,8 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_MAX_BUFFER = 10 * 1024 * 1024;
 const DEFAULT_PAGE_SIZE = 100;
 const DEFAULT_MAX_PAGES = 10;
+const DEFAULT_TIMEOUT_MS = 60_000;
+const DEFAULT_ACTION_HOST = process.env.XAPI_ACTION_HOST || 'action.xapi.to';
 
 function parseJsonMaybe(value) {
   if (!value) return null;
@@ -33,6 +35,14 @@ function getErrorMessage(errorValue) {
 function resolvePositiveInt(value, fallback) {
   const parsed = Number.parseInt(String(value ?? ''), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function resolveScheme(host) {
+  return host.startsWith('localhost') || host.startsWith('127.') ? 'http' : 'https';
+}
+
+function getActionBaseUrl(actionHost) {
+  return `${resolveScheme(actionHost)}://${actionHost}`;
 }
 
 function resolveInvocation() {
@@ -71,13 +81,7 @@ function parseXapiResponse(actionId, stdout, stderr) {
   return parsed;
 }
 
-export async function callXapi(actionId, input = {}, options = {}) {
-  const apiKey = options.apiKey ?? process.env.XAPI_API_KEY;
-
-  if (!apiKey) {
-    throw new Error('Missing XAPI_API_KEY environment variable');
-  }
-
+async function callXapiViaCli(actionId, input, options, apiKey) {
   const invocation = options.invocation ?? resolveInvocation();
   const executor = options.executor ?? defaultExecutor;
   const env = {
@@ -120,6 +124,64 @@ export async function callXapi(actionId, input = {}, options = {}) {
 
     throw new Error(`xapi ${actionId} failed: ${errorMessage}`);
   }
+}
+
+async function callXapiOverHttp(actionId, input, options, apiKey) {
+  const actionHost = options.actionHost ?? DEFAULT_ACTION_HOST;
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const controller = new AbortController();
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetchImpl(`${getActionBaseUrl(actionHost)}/v1/actions/execute`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'XAPI-Key': apiKey,
+      },
+      body: JSON.stringify({
+        action_id: actionId,
+        input,
+      }),
+      signal: controller.signal,
+    });
+
+    const bodyText = await response.text();
+    const parsed = parseXapiResponse(actionId, bodyText, '');
+
+    if (!response.ok) {
+      throw new Error(`xapi ${actionId} failed: HTTP ${response.status}: ${bodyText.slice(0, 300)}`);
+    }
+
+    return parsed;
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith(`xapi ${actionId}`)) {
+      throw error;
+    }
+
+    if (error?.name === 'AbortError') {
+      throw new Error(`xapi ${actionId} failed: request timed out after ${timeoutMs}ms`);
+    }
+
+    throw new Error(`xapi ${actionId} failed: ${error?.message || 'Unknown error'}`);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function callXapi(actionId, input = {}, options = {}) {
+  const apiKey = options.apiKey ?? process.env.XAPI_API_KEY;
+
+  if (!apiKey) {
+    throw new Error('Missing XAPI_API_KEY environment variable');
+  }
+
+  if (options.executor) {
+    return callXapiViaCli(actionId, input, options, apiKey);
+  }
+
+  return callXapiOverHttp(actionId, input, options, apiKey);
 }
 
 export async function getUserByScreenName(screenName, options = {}) {

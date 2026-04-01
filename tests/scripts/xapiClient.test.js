@@ -38,6 +38,33 @@ test('callXapi passes JSON input to the executor and parses JSON output', async 
   assert.equal(calls[0].options.env.XAPI_API_KEY, 'test-key');
 });
 
+test('callXapi can execute through direct HTTP without the bun-based CLI', async () => {
+  const calls = [];
+
+  const result = await callXapi('twitter.user_by_screen_name', { screen_name: 'OpenAI' }, {
+    apiKey: 'test-key',
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return {
+        ok: true,
+        status: 201,
+        async text() {
+          return JSON.stringify({
+            success: true,
+            data: { screen_name: 'OpenAI', rest_id: '4398626122' },
+          });
+        },
+      };
+    },
+  });
+
+  assert.equal(result.data.screen_name, 'OpenAI');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'https://action.xapi.to/v1/actions/execute');
+  assert.equal(calls[0].options.method, 'POST');
+  assert.equal(calls[0].options.headers['XAPI-Key'], 'test-key');
+});
+
 test('getAllFollowingUsers paginates until cursor_bottom is exhausted', async () => {
   const seenInputs = [];
 

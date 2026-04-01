@@ -1,64 +1,83 @@
 # Railway 部署说明
 
-这个项目已经适配 Railway：
+这个项目已经适配 Railway。
 
-- 构建命令由 [railway.json](/E:/vibe/AI_Influencers_X/railway.json) 指向 `npm run build:railway`
-- 启动命令是 `npm run start`
-- 运行时用 [server.js](/E:/vibe/AI_Influencers_X/server.js) 提供静态站点和 SPA 回退
+关键文件：
 
-## 最简单部署
+- [railway.json](/E:/vibe/AI_Influencers_X/railway.json)
+- [server.js](/E:/vibe/AI_Influencers_X/server.js)
+- [scripts/prepareSharedFollowingData.js](/E:/vibe/AI_Influencers_X/scripts/prepareSharedFollowingData.js)
+- [scripts/generateSharedFollowingData.js](/E:/vibe/AI_Influencers_X/scripts/generateSharedFollowingData.js)
 
-1. 把仓库连接到 Railway
-2. Railway 会读取 [railway.json](/E:/vibe/AI_Influencers_X/railway.json)
-3. 设置环境变量
-4. 点击 Deploy
+## Railway 默认行为
 
-## 必配环境变量
+- Build Command: `npm run build:railway`
+- Start Command: `npm run start`
 
-- `GEMINI_API_KEY`
-  只有你还要用 Gemini 扩图功能时才需要
+默认部署时：
 
-## Shared Following 候选池相关
+- 会正常构建前端
+- 不会自动抓取 shared-following 候选池
+- 不需要 `bun`
 
-默认情况下，Railway **不会**在每次部署时重新抓取 shared-following 数据。
+注意：现在 xapi 调用已经改成直接走 HTTP API，不再依赖 `xapi-to` 的 bun CLI，所以 Railway 上不会再因为 `/usr/bin/env: bun` 报错。
 
-也就是说：
+## 最省心的部署方式
 
-- 如果仓库里的 [sharedFollowingData.ts](/E:/vibe/AI_Influencers_X/sharedFollowingData.ts) 已经有内容，部署会直接使用它
-- 如果它还是空的，前端会提示你先生成数据
+推荐你用这条：
 
-## 如果你想在 Railway 构建时自动生成 shared-following 数据
+1. 本地先生成 shared-following 数据
+2. 把生成后的 [sharedFollowingData.ts](/E:/vibe/AI_Influencers_X/sharedFollowingData.ts) 提交到仓库
+3. Railway 只负责 build 和 start
 
-额外配置下面这些环境变量：
+本地命令：
+
+```bash
+npm install
+npm run generate-shared-following
+npm run build:railway
+```
+
+这种方式最稳，因为不会在 Railway 每次部署时都重新消耗 XAPI 配额。
+
+## 如果你想让 Railway 在构建时自动生成 shared-following 数据
+
+需要配置这些环境变量：
 
 - `GENERATE_SHARED_FOLLOWING=true`
 - `XAPI_API_KEY=你的 xapi key`
 
-可选：
+可选环境变量：
 
 - `XAPI_FOLLOWING_PAGE_SIZE=100`
 - `XAPI_MAX_FOLLOWING_PAGES=10`
+- `SHARED_FOLLOWING_SOURCE_LIMIT=20`
 
-这样 Railway 在 build 阶段会先执行：
+其中：
 
-```bash
-node scripts/prepareSharedFollowingData.js
-```
+- `SHARED_FOLLOWING_SOURCE_LIMIT` 很适合你不熟时先小范围试跑
+- 比如设成 `10` 或 `20`，先确认 Railway 构建链路没问题
+- 确认稳定后，再去掉它或者调大
 
-如果 `GENERATE_SHARED_FOLLOWING` 不是 `true`，这个步骤会自动跳过，不会报错。
+## 推荐的 Railway 试跑顺序
 
-## 推荐做法
+第一次建议这样配：
 
-更稳妥的方式是：
+- `GENERATE_SHARED_FOLLOWING=true`
+- `XAPI_API_KEY=你的 key`
+- `SHARED_FOLLOWING_SOURCE_LIMIT=10`
 
-1. 本地先跑一次 `npm run generate-shared-following`
-2. 确认 [sharedFollowingData.ts](/E:/vibe/AI_Influencers_X/sharedFollowingData.ts) 已经生成
-3. 提交到仓库
-4. Railway 只负责正常构建和部署
+这样会只拿前 10 个 Top300 账号去生成 shared-following 候选池，速度更快，也更不容易超时。
 
-这样可以避免每次 deploy 都重新消耗 XAPI 调用额度。
+如果确认没问题，再逐步提高：
+
+- `20`
+- `50`
+- 最后再考虑全量 `300`
 
 ## 本地模拟 Railway
+
+不生成 shared-following：
 
 ```bash
 npm install
@@ -66,15 +85,26 @@ npm run build:railway
 npm run start
 ```
 
-如果你要模拟“构建时自动生成候选池”，再加环境变量：
+模拟 Railway 自动生成：
 
 ```bash
 GENERATE_SHARED_FOLLOWING=true
 XAPI_API_KEY=你的key
+SHARED_FOLLOWING_SOURCE_LIMIT=10
+npm run build:railway
 ```
 
-## 说明
+## 你现在最该怎么配
 
-- [scripts/prepareSharedFollowingData.js](/E:/vibe/AI_Influencers_X/scripts/prepareSharedFollowingData.js) 负责决定要不要在 build 前生成数据
-- [scripts/generateSharedFollowingData.js](/E:/vibe/AI_Influencers_X/scripts/generateSharedFollowingData.js) 负责真正抓取和写入 shared-following 数据
-- [server.js](/E:/vibe/AI_Influencers_X/server.js) 负责 Railway 运行时提供静态页面
+如果你只是想先把站部署上去：
+
+- 不要开 `GENERATE_SHARED_FOLLOWING`
+- 先直接部署
+
+如果你想连 shared-following 一起上线，但又不想一开始就跑满 300：
+
+- 开 `GENERATE_SHARED_FOLLOWING=true`
+- 加 `XAPI_API_KEY`
+- 再加 `SHARED_FOLLOWING_SOURCE_LIMIT=10`
+
+这样最稳。
