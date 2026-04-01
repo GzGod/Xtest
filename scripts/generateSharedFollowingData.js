@@ -174,11 +174,56 @@ export const SHARED_FOLLOWING_DATA: SharedFollowingData = ${JSON.stringify(data,
   fs.writeFileSync(outputPath, fileContent);
 }
 
+export async function collectFollowingsBySource(options = {}) {
+  const topNodes = options.topNodes || [];
+  const apiKey = options.apiKey ?? process.env.XAPI_API_KEY;
+  const pageSize = options.pageSize ?? process.env.XAPI_FOLLOWING_PAGE_SIZE;
+  const maxPages = options.maxPages ?? process.env.XAPI_MAX_FOLLOWING_PAGES;
+  const continueOnSourceError = options.continueOnSourceError === true;
+  const fetchFollowingUsersByScreenName = options.fetchFollowingUsersByScreenName || getFollowingUsersByScreenName;
+  const followingsBySource = {};
+  const failures = [];
+
+  console.log(`Generating shared-following candidate pool from ${topNodes.length} core nodes...`);
+
+  for (const node of topNodes) {
+    const sourceId = normalizeId(node.id);
+    const sourceHandle = node.handle || node.id;
+    console.log(`Fetching external followings for @${sourceHandle}...`);
+
+    try {
+      followingsBySource[sourceId] = await fetchFollowingUsersByScreenName(sourceHandle, {
+        apiKey,
+        pageSize,
+        maxPages,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      if (!continueOnSourceError) {
+        throw error;
+      }
+
+      console.warn(`Skipping @${sourceHandle} because shared-following fetch failed: ${message}`);
+      failures.push({
+        handle: sourceHandle,
+        message,
+      });
+    }
+  }
+
+  return {
+    followingsBySource,
+    failures,
+  };
+}
+
 export async function generateSharedFollowingData(options = {}) {
   const apiKey = options.apiKey ?? process.env.XAPI_API_KEY;
   const pageSize = options.pageSize ?? process.env.XAPI_FOLLOWING_PAGE_SIZE;
   const maxPages = options.maxPages ?? process.env.XAPI_MAX_FOLLOWING_PAGES;
   const sourceLimit = options.sourceLimit ?? process.env.SHARED_FOLLOWING_SOURCE_LIMIT;
+  const continueOnSourceError = options.continueOnSourceError === true;
   const constantsPath = options.constantsPath ?? path.join(__dirname, '..', 'constants.ts');
   const outputPath = options.outputPath ?? path.join(__dirname, '..', 'sharedFollowingData.ts');
 
@@ -191,23 +236,22 @@ export async function generateSharedFollowingData(options = {}) {
   const selectedTopNodes = Number.isFinite(limit) && limit > 0
     ? topNodes.slice(0, limit)
     : topNodes;
-  const followingsBySource = {};
-
-  console.log(`Generating shared-following candidate pool from ${selectedTopNodes.length} core nodes...`);
-
-  for (const node of selectedTopNodes) {
-    const sourceId = normalizeId(node.id);
-    console.log(`Fetching external followings for @${node.handle || node.id}...`);
-    followingsBySource[sourceId] = await getFollowingUsersByScreenName(node.handle || node.id, {
-      apiKey,
-      pageSize,
-      maxPages,
-    });
-  }
+  const { followingsBySource, failures } = await collectFollowingsBySource({
+    topNodes: selectedTopNodes,
+    apiKey,
+    pageSize,
+    maxPages,
+    continueOnSourceError,
+    fetchFollowingUsersByScreenName: options.fetchFollowingUsersByScreenName,
+  });
 
   const dataset = buildSharedFollowingDataset({ topNodes: selectedTopNodes, followingsBySource });
   writeSharedFollowingData(outputPath, dataset);
   console.log(`Wrote shared-following data to ${outputPath}`);
+
+  if (failures.length > 0) {
+    console.warn(`Shared-following generation completed with ${failures.length} skipped source(s).`);
+  }
 
   return dataset;
 }

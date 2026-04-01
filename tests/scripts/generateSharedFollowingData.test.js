@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   buildSharedFollowingDataset,
+  collectFollowingsBySource,
   classifyCandidateProfile,
 } from '../../scripts/generateSharedFollowingData.js';
 
@@ -70,4 +71,43 @@ test('classifyCandidateProfile identifies likely commercial creators over offici
   assert.equal(creator.isLikelyCommercialKOL, true);
   assert.equal(brand.candidateType, 'company');
   assert.equal(brand.isLikelyCommercialKOL, false);
+});
+
+test('collectFollowingsBySource can skip failed sources and keep partial results', async () => {
+  const calls = [];
+
+  const result = await collectFollowingsBySource({
+    topNodes: [
+      { id: 'alpha', handle: 'alpha' },
+      { id: 'beta', handle: 'beta' },
+    ],
+    continueOnSourceError: true,
+    fetchFollowingUsersByScreenName: async (handle) => {
+      calls.push(handle);
+
+      if (handle === 'beta') {
+        throw new Error('fetch failed');
+      }
+
+      return [
+        {
+          id: 'c1',
+          screen_name: 'creator1',
+          name: 'Creator 1',
+          description: 'AI creator with a newsletter',
+          followers_count: 12000,
+        },
+      ];
+    },
+  });
+
+  assert.deepEqual(calls, ['alpha', 'beta']);
+  assert.deepEqual(Object.keys(result.followingsBySource), ['alpha']);
+  assert.equal(result.followingsBySource.alpha.length, 1);
+  assert.deepEqual(result.failures, [
+    {
+      handle: 'beta',
+      message: 'fetch failed',
+    },
+  ]);
 });
