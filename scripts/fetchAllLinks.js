@@ -2,49 +2,22 @@ import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { getFollowingUsersByScreenName } from './xapiClient.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
-const RAPIDAPI_HOST = process.env.RAPIDAPI_HOST;
+const XAPI_API_KEY = process.env.XAPI_API_KEY;
 
-if (!RAPIDAPI_KEY || !RAPIDAPI_HOST) {
-  console.error('Missing RAPIDAPI_KEY or RAPIDAPI_HOST in .env file');
+if (!XAPI_API_KEY) {
+  console.error('Missing XAPI_API_KEY in environment');
   process.exit(1);
-}
-
-// Rate limiting helper
-const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-// API call helper
-async function apiCall(endpoint, params = {}) {
-  const url = new URL(`https://${RAPIDAPI_HOST}${endpoint}`);
-  Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined) url.searchParams.append(key, value);
-  });
-
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: {
-      'x-rapidapi-key': RAPIDAPI_KEY,
-      'x-rapidapi-host': RAPIDAPI_HOST,
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`API error: ${response.status} ${response.statusText}`);
-  }
-
-  return response.json();
 }
 
 // Get following list for a user
 async function getFollowings(screenname) {
   try {
-    const data = await apiCall('/following.php', { screenname });
-    await delay(1000); // 1 second delay to avoid rate limits
-    return data?.following || [];
+    return await getFollowingUsersByScreenName(screenname, { apiKey: XAPI_API_KEY });
   } catch (error) {
     console.error(`  Error fetching followings for @${screenname}: ${error.message}`);
     return [];
@@ -108,14 +81,14 @@ async function main() {
   console.log(`Already completed: ${progress.completedHandles.length}`);
   console.log(`Remaining: ${remaining.length}\n`);
 
-  let apiCalls = 0;
+  let processedHandles = 0;
 
   for (let i = 0; i < remaining.length; i++) {
     const handle = remaining[i];
     console.log(`[${progress.completedHandles.length + i + 1}/${handles.length}] Fetching who @${handle} follows...`);
 
     const following = await getFollowings(handle);
-    apiCalls++;
+    processedHandles++;
 
     // Filter to only people in our 300-node set
     const relevantFollows = [];
@@ -134,15 +107,15 @@ async function main() {
     progress.followingMap = followingMap;
 
     // Save progress every 5 calls
-    if (apiCalls % 5 === 0) {
+    if (processedHandles % 5 === 0) {
       saveProgress(progress);
-      console.log(`  [Progress saved - ${apiCalls} API calls so far]\n`);
+      console.log(`  [Progress saved - ${processedHandles} handles processed so far]\n`);
     }
   }
 
   // Final save
   saveProgress(progress);
-  console.log(`\nCrawling complete! ${apiCalls} API calls made.\n`);
+  console.log(`\nCrawling complete! ${processedHandles} handles processed.\n`);
 
   // Generate links
   console.log('Generating links...');
@@ -192,7 +165,7 @@ export const INITIAL_DATA: GraphData = {
   console.log('Cleaned up progress file.');
 
   console.log('\n=== Complete! ===');
-  console.log(`Total API calls this run: ${apiCalls}`);
+  console.log(`Total handles processed this run: ${processedHandles}`);
   console.log(`Total links: ${links.length}`);
 }
 

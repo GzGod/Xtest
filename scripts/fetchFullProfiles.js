@@ -2,48 +2,22 @@ import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { getUserByScreenName, normalizeXUser } from './xapiClient.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
-const RAPIDAPI_HOST = process.env.RAPIDAPI_HOST;
+const XAPI_API_KEY = process.env.XAPI_API_KEY;
 
-if (!RAPIDAPI_KEY || !RAPIDAPI_HOST) {
-  console.error('Missing RAPIDAPI_KEY or RAPIDAPI_HOST in .env file');
+if (!XAPI_API_KEY) {
+  console.error('Missing XAPI_API_KEY in environment');
   process.exit(1);
-}
-
-// Rate limiting helper
-const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-// API call helper
-async function apiCall(endpoint, params = {}) {
-  const url = new URL(`https://${RAPIDAPI_HOST}${endpoint}`);
-  Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined) url.searchParams.append(key, value);
-  });
-
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: {
-      'x-rapidapi-key': RAPIDAPI_KEY,
-      'x-rapidapi-host': RAPIDAPI_HOST,
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`API error: ${response.status} ${response.statusText}`);
-  }
-
-  return response.json();
 }
 
 // Get full user profile by username
 async function getFullProfile(username) {
   try {
-    const data = await apiCall('/screenname.php', { screenname: username });
-    await delay(1000); // 1 second delay to avoid rate limits
+    const data = await getUserByScreenName(username, { apiKey: XAPI_API_KEY });
     return data;
   } catch (error) {
     console.error(`  Error fetching @${username}:`, error.message);
@@ -199,9 +173,10 @@ async function main() {
 
     const profile = await getFullProfile(handle);
 
-    if (profile && profile.status !== 'error') {
+    if (profile && (profile.rest_id || profile.id || profile.screen_name)) {
       // Apply manual overrides if available
       const overrides = CURATED_OVERRIDES[handle.toLowerCase()] || {};
+      const normalizedProfile = normalizeXUser(profile);
 
       let joinedDate = '';
       if (profile.created_at) {
@@ -211,28 +186,28 @@ async function main() {
         } catch (e) {}
       }
 
-      const description = profile.desc || '';
+      const description = normalizedProfile?.description || '';
 
       updatedProfiles.push({
-        id: (profile.profile || handle).toLowerCase(),
-        name: profile.name || handle,
+        id: (normalizedProfile?.username || handle).toLowerCase(),
+        name: normalizedProfile?.name || handle,
         group: overrides.group || categorizeUser(description, profile.name),
-        role: overrides.role || extractRole(description, profile.name, handle),
-        handle: profile.profile || handle,
+        role: overrides.role || extractRole(description, normalizedProfile?.name, handle),
+        handle: normalizedProfile?.username || handle,
         associated: overrides.associated || '',
-        verified: profile.blue_verified ? 'blue' : undefined,
+        verified: normalizedProfile?.verified ? 'blue' : undefined,
         joinedDate: joinedDate,
         bioTags: extractBioTags(description),
         bio: description.slice(0, 200),
-        followers: profile.sub_count || 0,
-        following: profile.friends || 0,
-        location: profile.location || '',
-        website: profile.website || '',
-        imageUrl: profile.avatar?.replace('_normal', '_400x400') || '',
+        followers: normalizedProfile?.followers_count || 0,
+        following: normalizedProfile?.following_count || 0,
+        location: normalizedProfile?.location || '',
+        website: normalizedProfile?.website || '',
+        imageUrl: normalizedProfile?.profile_image?.replace('_normal', '_400x400') || '',
       });
 
       successCount++;
-      console.log(`  ✓ ${profile.name} - ${(profile.sub_count || 0).toLocaleString()} followers`);
+      console.log(`  ✓ ${normalizedProfile?.name || handle} - ${(normalizedProfile?.followers_count || 0).toLocaleString()} followers`);
     } else {
       // Keep existing data if API fails
       updatedProfiles.push(node);

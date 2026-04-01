@@ -2,15 +2,19 @@ import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import {
+  getAllFollowingUsers,
+  getUserByScreenName,
+  normalizeXUser,
+} from './xapiClient.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
-const RAPIDAPI_HOST = process.env.RAPIDAPI_HOST;
+const XAPI_API_KEY = process.env.XAPI_API_KEY;
 
-if (!RAPIDAPI_KEY || !RAPIDAPI_HOST) {
-  console.error('Missing RAPIDAPI_KEY or RAPIDAPI_HOST in .env file');
+if (!XAPI_API_KEY) {
+  console.error('Missing XAPI_API_KEY in environment');
   process.exit(1);
 }
 
@@ -110,37 +114,11 @@ function isAIRelevant(description, name, username) {
   return false;
 }
 
-// Rate limiting helper
-const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-// API call helper for Twitter API45
-async function apiCall(endpoint, params = {}) {
-  const url = new URL(`https://${RAPIDAPI_HOST}${endpoint}`);
-  Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined) url.searchParams.append(key, value);
-  });
-
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: {
-      'x-rapidapi-key': RAPIDAPI_KEY,
-      'x-rapidapi-host': RAPIDAPI_HOST,
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`API error: ${response.status} ${response.statusText}`);
-  }
-
-  return response.json();
-}
-
-// Get user profile by username (Twitter API45 format)
+// Get user profile by username
 async function getUserByUsername(username) {
   try {
     console.log(`  Fetching profile: @${username}`);
-    const data = await apiCall('/screenname.php', { screenname: username });
-    await delay(1000); // 1 second delay to avoid rate limits
+    const data = await getUserByScreenName(username, { apiKey: XAPI_API_KEY });
     return data;
   } catch (error) {
     console.error(`  Error fetching @${username}:`, error.message);
@@ -148,35 +126,9 @@ async function getUserByUsername(username) {
   }
 }
 
-// Get following list for a user by screenname (Twitter API45 format)
-async function getFollowings(screenname) {
-  try {
-    const data = await apiCall('/following.php', { screenname });
-    await delay(1000); // 1 second delay to avoid rate limits
-    return data?.following || [];
-  } catch (error) {
-    console.error(`  Error fetching followings for @${screenname}:`, error.message);
-    return [];
-  }
-}
-
-// Extract user data from Twitter API45 profile response
+// Extract user data from xapi profile/following responses
 function extractUserData(user) {
-  if (!user || user.status === 'error') return null;
-
-  return {
-    id: user.rest_id || user.user_id,
-    username: user.profile || user.screen_name,
-    name: user.name || user.profile || user.screen_name,
-    description: user.desc || user.description || '',
-    followers_count: user.sub_count || user.followers_count || 0,
-    following_count: user.friends || user.friends_count || 0,
-    created_at: user.created_at,
-    location: user.location || '',
-    verified: user.blue_verified || false,
-    website: user.website || '',
-    profile_image: user.avatar || user.profile_image || '',
-  };
+  return normalizeXUser(user);
 }
 
 // Categorize based on bio and role
@@ -339,7 +291,7 @@ function calculateScore(followers, seedCount) {
 
 async function main() {
   console.log('=== AI Influencer Network Crawler ===\n');
-  console.log('Using Twitter API45 via RapidAPI\n');
+  console.log('Using xapi Twitter capability via XAPI_API_KEY\n');
 
   const userScores = new Map(); // username -> { followers, followedBy, userData }
 
@@ -349,7 +301,7 @@ async function main() {
 
   for (const username of SEED_ACCOUNTS) {
     const user = await getUserByUsername(username);
-    if (user && user.status !== 'error' && (user.rest_id || user.profile)) {
+    if (user && (user.rest_id || user.id || user.screen_name)) {
       const userData = extractUserData(user);
       if (userData && userData.username) {
         seedProfiles.push({ username: userData.username, userData });
@@ -370,8 +322,10 @@ async function main() {
 
   for (const seed of seedProfiles) {
     console.log(`  Fetching who @${seed.username} follows...`);
-    const following = await getFollowings(seed.username);
-    requestCount++;
+    const following = await getAllFollowingUsers(seed.userData.id, {
+      apiKey: XAPI_API_KEY,
+    });
+    requestCount += 1;
 
     for (const user of following) {
       if (!user || !user.screen_name) continue;

@@ -25,7 +25,7 @@ There are millions of pieces of AI news and information generated every second o
 | Styling | Tailwind CSS (CDN) |
 | Icons | Lucide React |
 | Analytics | Vercel Analytics |
-| Data pipeline | Node.js + RapidAPI (X/Twitter) |
+| Data pipeline | Node.js + xapi.to (X/Twitter) |
 
 ---
 
@@ -42,3 +42,4 @@ There are millions of pieces of AI news and information generated every second o
 
 1. Install dependencies: `npm install`
 2. Run the app: `npm run dev`
+3. For crawler/data scripts, set `XAPI_API_KEY` in your Railway environment or local `.env`

@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "fetch-influencers": "node scripts/fetchInfluencers.js"
+    "fetch-influencers": "node scripts/fetchInfluencers.js",
+    "test": "node --test"
   },
   "dependencies": {
     "@google/genai": "^1.38.0",
